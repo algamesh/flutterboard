@@ -1,0 +1,27 @@
+name: flutter_dashboard
+description: Demonstration of shapefile->geojson usage in Flutter
+
+publish_to: "none"
+
+environment:
+  sdk: ">=2.17.0 <3.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  maplibre_gl: ^0.20.0
+  # If you want to read shapefiles *directly* in Flutter, you might add:
+  # flutter_geokit: ^0.1.5
+  # (But we've already converted them in Python.)
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - ./assets/geojsons/CTPS_TDM23_TAZ_2017g_v202303.geojson
+    - ./assets/geojsons/taz_new_Feb05_1.geojson
+    - ./assets/geojsons/blocks20a.geojson

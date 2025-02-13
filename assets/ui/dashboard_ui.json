@@ -1,0 +1,191 @@
+{
+    "type": "column",
+    "args": {
+      "crossAxisAlignment": "stretch"
+    },
+    "children": [
+      {
+        "type": "container",
+        "args": {
+          "color": "#f0f0f0",
+          "padding": {
+            "left": 10,
+            "right": 10,
+            "top": 4,
+            "bottom": 4
+          },
+          "child": {
+            "type": "row",
+            "args": {
+              "mainAxisAlignment": "start",
+              "children": [
+                {
+                  "type": "raised_button",
+                  "args": {
+                    "child": {
+                      "type": "text",
+                      "args": {
+                        "text": "Toggle Drawer"
+                      }
+                    }
+                  },
+                  "on_pressed": {
+                    "type": "execute_function",
+                    "args": {
+                      "function": "toggleDrawer"
+                    }
+                  }
+                },
+                {
+                  "type": "raised_button",
+                  "args": {
+                    "child": {
+                      "type": "text",
+                      "args": {
+                        "text": "Settings"
+                      }
+                    }
+                  },
+                  "on_pressed": {
+                    "type": "execute_function",
+                    "args": {
+                      "function": "openSettings"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "type": "container",
+        "args": {
+          "padding": {
+            "left": 10,
+            "right": 10,
+            "top": 10,
+            "bottom": 10
+          },
+          "child": {
+            "type": "column",
+            "children": [
+              {
+                "type": "row",
+                "children": [
+                  {
+                    "type": "checkbox",
+                    "args": {
+                      "value": true
+                    },
+                    "on_changed": {
+                      "type": "execute_function",
+                      "args": {
+                        "function": "togglePopulationLayer"
+                      }
+                    }
+                  },
+                  {
+                    "type": "text",
+                    "args": {
+                      "text": "Show Population (persns19)"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "row",
+                "children": [
+                  {
+                    "type": "text",
+                    "args": {
+                      "text": "Population Filter:"
+                    }
+                  },
+                  {
+                    "type": "slider",
+                    "args": {
+                      "min": 0.0,
+                      "max": 5000.0,
+                      "divisions": 50,
+                      "value": 0.0
+                    },
+                    "on_changed": {
+                      "type": "execute_function",
+                      "args": {
+                        "function": "onPopulationSliderChange"
+                      }
+                    }
+                  },
+                  {
+                    "type": "text",
+                    "args": {
+                      "text": "0",
+                      "key": "populationSliderValue"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "row",
+                "children": [
+                  {
+                    "type": "checkbox",
+                    "args": {
+                      "value": true
+                    },
+                    "on_changed": {
+                      "type": "execute_function",
+                      "args": {
+                        "function": "toggleEmploymentLayer"
+                      }
+                    }
+                  },
+                  {
+                    "type": "text",
+                    "args": {
+                      "text": "Show Employment (workrs19)"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "row",
+                "children": [
+                  {
+                    "type": "text",
+                    "args": {
+                      "text": "Employment Filter:"
+                    }
+                  },
+                  {
+                    "type": "slider",
+                    "args": {
+                      "min": 0.0,
+                      "max": 5000.0,
+                      "divisions": 50,
+                      "value": 0.0
+                    },
+                    "on_changed": {
+                      "type": "execute_function",
+                      "args": {
+                        "function": "onEmploymentSliderChange"
+                      }
+                    }
+                  },
+                  {
+                    "type": "text",
+                    "args": {
+                      "text": "0",
+                      "key": "employmentSliderValue"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    ]
+  }
+  
