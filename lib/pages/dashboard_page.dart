@@ -39,7 +39,7 @@ class _DashboardPageState extends State<DashboardPage> {
                   },
                 ),
                 const Text('Old TAZ'),
-
+                const SizedBox(width: 16),
                 // New TAZ
                 Checkbox(
                   value: _showNewTaz,
@@ -51,7 +51,7 @@ class _DashboardPageState extends State<DashboardPage> {
                   },
                 ),
                 const Text('New TAZ'),
-
+                const SizedBox(width: 16),
                 // Blocks
                 Checkbox(
                   value: _showBlocks,

@@ -1,13 +1,15 @@
 import 'dart:async';
-import 'dart:html' as html;
+import 'dart:convert';
+import 'dart:html' as html; // For web-only script injection
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:maplibre_gl/maplibre_gl.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // If running on the web, inject the MapLibre JS/CSS dynamically
+  // If running on the web, inject the MapLibre JS/CSS dynamically.
   if (kIsWeb) {
     await injectMapLibreScripts();
   }
@@ -15,16 +17,16 @@ Future<void> main() async {
   runApp(const MyApp());
 }
 
-/// Injects MapLibre JS & CSS and ensures it is fully loaded before Flutter tries to use it
+/// Injects MapLibre JS & CSS and ensures they are loaded before Flutter tries to use them.
 Future<void> injectMapLibreScripts() async {
-  // Inject CSS
+  // Inject MapLibre CSS
   final html.LinkElement link = html.LinkElement()
     ..href = "https://unpkg.com/maplibre-gl@latest/dist/maplibre-gl.css"
     ..rel = "stylesheet"
     ..crossOrigin = "anonymous";
   html.document.head!.append(link);
 
-  // Inject JS and wait for it to load before proceeding
+  // Inject MapLibre JS and wait for it to load.
   final completer = Completer<void>();
   final html.ScriptElement script = html.ScriptElement()
     ..src = "https://unpkg.com/maplibre-gl@latest/dist/maplibre-gl.js"
@@ -38,474 +40,137 @@ Future<void> injectMapLibreScripts() async {
       debugPrint("❌ Failed to load MapLibre GL JS.");
       completer.completeError("Failed to load MapLibre GL JS.");
     });
-
   html.document.head!.append(script);
 
-  return completer.future; // Wait for script to load
+  return completer.future;
 }
 
-/// Main App Widget
+/// OSM style URL from MapLibre demo tiles.
+const String osmStyle = "https://demotiles.maplibre.org/style.json";
+
+/// Satellite style defined using Esri World Imagery.
+const String satelliteStyle = '''{
+  "version": 8,
+  "sources": {
+    "raster-tiles": {
+      "type": "raster",
+      "tiles": [
+        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+      ],
+      "tileSize": 256,
+      "attribution": "Tiles © Esri"
+    }
+  },
+  "layers": [
+    {
+      "id": "simple-tiles",
+      "type": "raster",
+      "source": "raster-tiles",
+      "minzoom": 0,
+      "maxzoom": 22
+    }
+  ]
+}''';
+
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'VizTAZ Dashboard',
+      title: 'Delaware Blocks',
       theme: ThemeData(primarySwatch: Colors.blue),
-      home: const DashboardPage(),
+      home: const MapScreen(),
     );
   }
 }
 
-/// The Dashboard Page – mimicking the multi‐panel Bokeh layout
-class DashboardPage extends StatefulWidget {
-  const DashboardPage({Key? key}) : super(key: key);
-
+class MapScreen extends StatefulWidget {
+  const MapScreen({super.key});
   @override
-  State<DashboardPage> createState() => _DashboardPageState();
+  _MapScreenState createState() => _MapScreenState();
 }
 
-class _DashboardPageState extends State<DashboardPage> {
-  // Controllers for user input
-  final TextEditingController _searchController = TextEditingController();
-  final TextEditingController _radiusController =
-      TextEditingController(text: "1000");
-
-  // A label to show which TAZ is currently searched
-  String _searchLabel = "Currently Searching TAZ: (none)";
-
-  // Map keys (so we can programmatically control each map)
-  final GlobalKey<MapViewState> _mapOldKey = GlobalKey();
-  final GlobalKey<MapViewState> _mapNewKey = GlobalKey();
-  final GlobalKey<MapViewState> _mapCombinedKey = GlobalKey();
-  final GlobalKey<MapViewState> _mapBlocksKey = GlobalKey();
-
-  // Example data for the "New TAZ" table
-  List<Map<String, dynamic>> _newTazTableData = [];
-  // Example data for the "Blocks" table
-  List<Map<String, dynamic>> _blocksTableData = [];
-
-  /// Called when the user presses "Search TAZ"
-  void _runSearch() {
-    final tazIdStr = _searchController.text.trim();
-    if (tazIdStr.isEmpty) {
-      setState(() {
-        _searchLabel = "Currently Searching TAZ: (none)";
-      });
-      return;
-    }
-
-    // Parse the TAZ ID
-    final tazId = int.tryParse(tazIdStr);
-    if (tazId == null) {
-      setState(() {
-        _searchLabel = "Currently Searching TAZ: (invalid ID)";
-      });
-      return;
-    }
-
-    // Parse the radius
-    final radius = double.tryParse(_radiusController.text.trim()) ?? 1000;
-
-    setState(() {
-      _searchLabel = "Currently Searching TAZ: $tazId";
-
-      // TODO: Implement real logic to:
-      // 1) Find the geometry for this TAZ
-      // 2) Buffer it by 'radius'
-      // 3) Filter old/new/blocks data to within that buffer
-      // 4) Update each map’s data/layers to show relevant polygons
-      // 5) Update these tables to reflect the selected polygons
-
-      // For demonstration, we’ll just set some dummy table data:
-      _newTazTableData = [
-        {
-          "id": tazId,
-          "HH19": 123,
-          "PERSNS19": 456,
-          "WORKRS19": 78,
-          "EMP19": 999,
-          "HH49": 140,
-          "PERSNS49": 490,
-          "WORKRS49": 90,
-          "EMP49": 1200
-        },
-        {
-          "id": 999,
-          "HH19": 321,
-          "PERSNS19": 654,
-          "WORKRS19": 87,
-          "EMP19": 555,
-          "HH49": 130,
-          "PERSNS49": 410,
-          "WORKRS49": 100,
-          "EMP49": 1100
-        },
-      ];
-      _blocksTableData = [
-        {
-          "id": "BlockA",
-          "HH19": 50,
-          "PERSNS19": 120,
-          "WORKRS19": 30,
-          "EMP19": 220,
-          "HH49": 80,
-          "PERSNS49": 200,
-          "WORKRS49": 35,
-          "EMP49": 300
-        },
-        {
-          "id": "BlockB",
-          "HH19": 70,
-          "PERSNS19": 180,
-          "WORKRS19": 40,
-          "EMP19": 300,
-          "HH49": 90,
-          "PERSNS49": 240,
-          "WORKRS49": 42,
-          "EMP49": 360
-        },
-      ];
-    });
-  }
-
-  /// Example function to synchronize zoom between maps
-  Future<void> _matchZoom() async {
-    // if (_mapOldKey.currentState?.controller == null) return;
-
-    // final currentCamera =
-    //     await _mapOldKey.currentState!.controller!.getCameraPosition();
-
-    // // Update the other maps with the same camera settings:
-    // _mapNewKey.currentState?.controller?.moveCamera(
-    //   CameraUpdate.newCameraPosition(currentCamera),
-    // );
-    // _mapCombinedKey.currentState?.controller?.moveCamera(
-    //   CameraUpdate.newCameraPosition(currentCamera),
-    // );
-    // _mapBlocksKey.currentState?.controller?.moveCamera(
-    //   CameraUpdate.newCameraPosition(currentCamera),
-    // );
-  }
+class _MapScreenState extends State<MapScreen> {
+  MaplibreMapController? _mapController;
+  // Start with the OSM style.
+  String _currentStyle = osmStyle;
+  // Flag to indicate whether the GeoJSON has been added to the style.
+  bool _geoJsonAdded = false;
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text("VizTAZ Dashboard"),
-      ),
-      body: Column(
-        children: [
-          // -----------------
-          // TOP CONTROL BAR
-          // -----------------
+        title: const Text("Delaware Blocks"),
+        actions: [
           Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: Row(
-              children: [
-                // TAZ ID input
-                SizedBox(
-                  width: 120,
-                  child: TextField(
-                    controller: _searchController,
-                    decoration: const InputDecoration(
-                      labelText: "Old TAZ ID",
-                      border: OutlineInputBorder(),
-                    ),
-                    onSubmitted: (_) => _runSearch(),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                // Radius input
-                SizedBox(
-                  width: 100,
-                  child: TextField(
-                    controller: _radiusController,
-                    decoration: const InputDecoration(
-                      labelText: "Radius (m)",
-                      border: OutlineInputBorder(),
-                    ),
-                    keyboardType: TextInputType.number,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                // Search Button
-                ElevatedButton(
-                  onPressed: _runSearch,
-                  child: const Text("Search TAZ"),
-                ),
-                const SizedBox(width: 8),
-                // Match Zoom Button
-                ElevatedButton(
-                  onPressed: _matchZoom,
-                  child: const Text("Match Zoom"),
-                ),
-                const SizedBox(width: 16),
-                // Label: "Currently Searching TAZ: ..."
-                Text(
-                  _searchLabel,
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
+            padding: const EdgeInsets.symmetric(horizontal: 8.0),
+            child: DropdownButton<String>(
+              value: _currentStyle == osmStyle ? "Map" : "Satellite",
+              items: const [
+                DropdownMenuItem(value: "Map", child: Text("Map")),
+                DropdownMenuItem(value: "Satellite", child: Text("Satellite")),
               ],
-            ),
-          ),
-          // -----------------
-          // MAIN CONTENT
-          // -----------------
-          Expanded(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                // Left side: 2×2 grid of maps
-                Expanded(
-                  flex: 2,
-                  child: Column(
-                    children: [
-                      Expanded(
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: MapView(
-                                key: _mapOldKey,
-                                title: "Old TAZ (Green)",
-                              ),
-                            ),
-                            Expanded(
-                              child: MapView(
-                                key: _mapNewKey,
-                                title: "New TAZ (Red)",
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Expanded(
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: MapView(
-                                key: _mapCombinedKey,
-                                title: "Combined",
-                              ),
-                            ),
-                            Expanded(
-                              child: MapView(
-                                key: _mapBlocksKey,
-                                title: "Blocks",
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                // Right side: Data Tables in a vertical column
-                Container(
-                  width: 400, // adjust as needed
-                  padding: const EdgeInsets.all(8.0),
-                  color: Colors.grey[200],
-                  child: Column(
-                    children: [
-                      const Text(
-                        "New TAZ Table",
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      Expanded(
-                        child: SingleChildScrollView(
-                          scrollDirection: Axis.vertical,
-                          child: SingleChildScrollView(
-                            scrollDirection: Axis.horizontal,
-                            child: DataTable(
-                              columns: const [
-                                DataColumn(label: Text("ID")),
-                                DataColumn(label: Text("HH19")),
-                                DataColumn(label: Text("PERSNS19")),
-                                DataColumn(label: Text("WORKRS19")),
-                                DataColumn(label: Text("EMP19")),
-                                DataColumn(label: Text("HH49")),
-                                DataColumn(label: Text("PERSNS49")),
-                                DataColumn(label: Text("WORKRS49")),
-                                DataColumn(label: Text("EMP49")),
-                              ],
-                              rows: _newTazTableData.isNotEmpty
-                                  ? _newTazTableData.map((row) {
-                                      return DataRow(cells: [
-                                        DataCell(Text("${row['id']}")),
-                                        DataCell(Text("${row['HH19']}")),
-                                        DataCell(Text("${row['PERSNS19']}")),
-                                        DataCell(Text("${row['WORKRS19']}")),
-                                        DataCell(Text("${row['EMP19']}")),
-                                        DataCell(Text("${row['HH49']}")),
-                                        DataCell(Text("${row['PERSNS49']}")),
-                                        DataCell(Text("${row['WORKRS49']}")),
-                                        DataCell(Text("${row['EMP49']}")),
-                                      ]);
-                                    }).toList()
-                                  : [
-                                      const DataRow(cells: [
-                                        DataCell(Text("No data")),
-                                        DataCell(Text("")),
-                                        DataCell(Text("")),
-                                        DataCell(Text("")),
-                                        DataCell(Text("")),
-                                        DataCell(Text("")),
-                                        DataCell(Text("")),
-                                        DataCell(Text("")),
-                                        DataCell(Text("")),
-                                      ])
-                                    ],
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      const Text(
-                        "Blocks Table",
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      Expanded(
-                        child: SingleChildScrollView(
-                          scrollDirection: Axis.vertical,
-                          child: SingleChildScrollView(
-                            scrollDirection: Axis.horizontal,
-                            child: DataTable(
-                              columns: const [
-                                DataColumn(label: Text("ID")),
-                                DataColumn(label: Text("HH19")),
-                                DataColumn(label: Text("PERSNS19")),
-                                DataColumn(label: Text("WORKRS19")),
-                                DataColumn(label: Text("EMP19")),
-                                DataColumn(label: Text("HH49")),
-                                DataColumn(label: Text("PERSNS49")),
-                                DataColumn(label: Text("WORKRS49")),
-                                DataColumn(label: Text("EMP49")),
-                              ],
-                              rows: _blocksTableData.isNotEmpty
-                                  ? _blocksTableData.map((row) {
-                                      return DataRow(cells: [
-                                        DataCell(Text("${row['id']}")),
-                                        DataCell(Text("${row['HH19']}")),
-                                        DataCell(Text("${row['PERSNS19']}")),
-                                        DataCell(Text("${row['WORKRS19']}")),
-                                        DataCell(Text("${row['EMP19']}")),
-                                        DataCell(Text("${row['HH49']}")),
-                                        DataCell(Text("${row['PERSNS49']}")),
-                                        DataCell(Text("${row['WORKRS49']}")),
-                                        DataCell(Text("${row['EMP49']}")),
-                                      ]);
-                                    }).toList()
-                                  : [
-                                      const DataRow(cells: [
-                                        DataCell(Text("No data")),
-                                        DataCell(Text("")),
-                                        DataCell(Text("")),
-                                        DataCell(Text("")),
-                                        DataCell(Text("")),
-                                        DataCell(Text("")),
-                                        DataCell(Text("")),
-                                        DataCell(Text("")),
-                                        DataCell(Text("")),
-                                      ])
-                                    ],
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+              onChanged: (value) {
+                if (value != null) {
+                  setState(() {
+                    // Change the style and force a rebuild.
+                    _currentStyle = value == "Map" ? osmStyle : satelliteStyle;
+                    _geoJsonAdded = false; // Reset flag to re-add the GeoJSON.
+                  });
+                }
+              },
             ),
           ),
         ],
       ),
-    );
-  }
-}
-
-/// Minimal MapView widget with MapLibre GL
-class MapView extends StatefulWidget {
-  final String title;
-  const MapView({Key? key, required this.title}) : super(key: key);
-
-  @override
-  MapViewState createState() => MapViewState();
-}
-
-class MapViewState extends State<MapView> {
-  MaplibreMapController? controller;
-
-  @override
-  Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        MaplibreMap(
-          // A public style; you can host your own style if needed
-          styleString: 'https://demotiles.maplibre.org/style.json',
-          onMapCreated: _onMapCreated,
-          initialCameraPosition: const CameraPosition(
-            target: LatLng(39.0, -95.0), // center on US
-            zoom: 4,
-          ),
+      // Use a ValueKey so that a style change rebuilds the MaplibreMap.
+      body: MaplibreMap(
+        key: ValueKey<String>(_currentStyle),
+        styleString: _currentStyle,
+        initialCameraPosition: const CameraPosition(
+          // Center over Delaware; adjust as needed.
+          target: LatLng(39.0, -75.5),
+          zoom: 7,
         ),
-        Positioned(
-          top: 8,
-          left: 8,
-          child: Container(
-            color: Colors.white70,
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            child: Text(
-              widget.title,
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  void _onMapCreated(MaplibreMapController ctrl) async {
-    controller = ctrl;
-    // If you want to load geojson layers right away:
-    // await _addGeoJsonSourceAndLayer(...);
-  }
-
-  /// Example: function to load a GeoJSON source and add a fill layer
-  Future<void> _addGeoJsonSourceAndLayer({
-    required String sourceId,
-    required String layerId,
-    required Map<String, dynamic> geojsonData,
-    required String fillColor,
-  }) async {
-    if (controller == null) return;
-
-    // Add the source
-    await controller!.addSource(
-      sourceId,
-      GeojsonSourceProperties(data: geojsonData),
-    );
-
-    // Add a fill layer
-    await controller!.addFillLayer(
-      sourceId,
-      layerId,
-      FillLayerProperties(
-        fillColor: fillColor,
-        fillOpacity: 0.6,
+        onMapCreated: _onMapCreated,
+        onStyleLoadedCallback: _onStyleLoaded,
       ),
     );
   }
 
-  /// Example: function to set a layer's visibility
-  Future<void> toggleLayerVisibility(String layerId, bool visible) async {
-    if (controller == null) return;
-    await controller!.setLayerVisibility(layerId, visible);
+  void _onMapCreated(MaplibreMapController controller) {
+    _mapController = controller;
+  }
+
+  /// When a new style is loaded, add the GeoJSON layer.
+  Future<void> _onStyleLoaded() async {
+    if (!_geoJsonAdded) {
+      try {
+        // Load the GeoJSON from assets.
+        final String geoJsonStr = await rootBundle
+            .loadString('assets/geojsons/delaware_blocks.geojson');
+        final Map<String, dynamic> geoJsonData = jsonDecode(geoJsonStr);
+
+        // Add the GeoJSON source.
+        await _mapController!.addSource(
+          "delaware_source",
+          GeojsonSourceProperties(data: geoJsonData),
+        );
+
+        // Add a fill layer to render the polygons.
+        await _mapController!.addFillLayer(
+          "delaware_source",
+          "delaware_layer",
+          FillLayerProperties(
+            fillColor: "#FF0000", // Red fill.
+            fillOpacity: 0.5,
+          ),
+        );
+        _geoJsonAdded = true;
+      } catch (e) {
+        debugPrint("Error adding GeoJSON: $e");
+      }
+    }
   }
 }
