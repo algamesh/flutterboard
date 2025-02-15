@@ -1,15 +1,15 @@
 import 'dart:async';
-import 'dart:convert'; // <-- ADDED
-import 'dart:html' as html;
+import 'dart:convert';
+import 'dart:html' as html; // For web injection
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show rootBundle; // <-- ADDED
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:maplibre_gl/maplibre_gl.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // If running on the web, inject the MapLibre JS/CSS dynamically
+  // If running on the web, inject MapLibre JS/CSS dynamically.
   if (kIsWeb) {
     await injectMapLibreScripts();
   }
@@ -17,16 +17,16 @@ Future<void> main() async {
   runApp(const MyApp());
 }
 
-/// Injects MapLibre JS & CSS and ensures it is fully loaded before Flutter tries to use it
+/// Injects MapLibre CSS & JS
 Future<void> injectMapLibreScripts() async {
-  // Inject CSS
+  // CSS
   final html.LinkElement link = html.LinkElement()
     ..href = "https://unpkg.com/maplibre-gl@latest/dist/maplibre-gl.css"
     ..rel = "stylesheet"
     ..crossOrigin = "anonymous";
   html.document.head!.append(link);
 
-  // Inject JS and wait for it to load before proceeding
+  // JS
   final completer = Completer<void>();
   final html.ScriptElement script = html.ScriptElement()
     ..src = "https://unpkg.com/maplibre-gl@latest/dist/maplibre-gl.js"
@@ -40,13 +40,11 @@ Future<void> injectMapLibreScripts() async {
       debugPrint("❌ Failed to load MapLibre GL JS.");
       completer.completeError("Failed to load MapLibre GL JS.");
     });
-
   html.document.head!.append(script);
 
-  return completer.future; // Wait for script to load
+  return completer.future;
 }
 
-/// Main App Widget
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
   @override
@@ -59,7 +57,7 @@ class MyApp extends StatelessWidget {
   }
 }
 
-/// The Dashboard Page – mimicking the multi‐panel Bokeh layout
+/// The Dashboard Page – multi‐panel layout
 class DashboardPage extends StatefulWidget {
   const DashboardPage({Key? key}) : super(key: key);
 
@@ -72,22 +70,14 @@ class _DashboardPageState extends State<DashboardPage> {
   final TextEditingController _searchController = TextEditingController();
   final TextEditingController _radiusController =
       TextEditingController(text: "1000");
-
-  // A label to show which TAZ is currently searched
   String _searchLabel = "Currently Searching TAZ: (none)";
-
-  // Map keys (so we can programmatically control each map)
-  final GlobalKey<MapViewState> _mapOldKey = GlobalKey();
-  final GlobalKey<MapViewState> _mapNewKey = GlobalKey();
-  final GlobalKey<MapViewState> _mapCombinedKey = GlobalKey();
-  final GlobalKey<MapViewState> _mapBlocksKey = GlobalKey();
 
   // Example data for the "New TAZ" table
   List<Map<String, dynamic>> _newTazTableData = [];
   // Example data for the "Blocks" table
   List<Map<String, dynamic>> _blocksTableData = [];
 
-  /// Called when the user presses "Search TAZ"
+  // Called when the user presses "Search TAZ"
   void _runSearch() {
     final tazIdStr = _searchController.text.trim();
     if (tazIdStr.isEmpty) {
@@ -97,7 +87,6 @@ class _DashboardPageState extends State<DashboardPage> {
       return;
     }
 
-    // Parse the TAZ ID
     final tazId = int.tryParse(tazIdStr);
     if (tazId == null) {
       setState(() {
@@ -106,20 +95,13 @@ class _DashboardPageState extends State<DashboardPage> {
       return;
     }
 
-    // Parse the radius
     final radius = double.tryParse(_radiusController.text.trim()) ?? 1000;
 
     setState(() {
       _searchLabel = "Currently Searching TAZ: $tazId";
 
-      // TODO: Implement real logic to:
-      // 1) Find the geometry for this TAZ
-      // 2) Buffer it by 'radius'
-      // 3) Filter old/new/blocks data to within that buffer
-      // 4) Update each map’s data/layers to show relevant polygons
-      // 5) Update these tables to reflect the selected polygons
-
-      // For demonstration, we’ll just set some dummy table data:
+      // TODO: Real logic to buffer & filter polygons
+      // For now, just updating dummy table data.
       _newTazTableData = [
         {
           "id": tazId,
@@ -171,22 +153,9 @@ class _DashboardPageState extends State<DashboardPage> {
     });
   }
 
-  /// Example function to synchronize zoom between maps
+  // Example function to sync zoom across maps (optional)
   Future<void> _matchZoom() async {
-    // (Implementation commented out for clarity)
-    // if (_mapOldKey.currentState?.controller == null) return;
-    // final currentCamera =
-    //     await _mapOldKey.currentState!.controller!.getCameraPosition();
-    // // Update the other maps with the same camera settings:
-    // _mapNewKey.currentState?.controller?.moveCamera(
-    //   CameraUpdate.newCameraPosition(currentCamera),
-    // );
-    // _mapCombinedKey.currentState?.controller?.moveCamera(
-    //   CameraUpdate.newCameraPosition(currentCamera),
-    // );
-    // _mapBlocksKey.currentState?.controller?.moveCamera(
-    //   CameraUpdate.newCameraPosition(currentCamera),
-    // );
+    // ...
   }
 
   @override
@@ -197,9 +166,7 @@ class _DashboardPageState extends State<DashboardPage> {
       ),
       body: Column(
         children: [
-          // -----------------
-          // TOP CONTROL BAR
-          // -----------------
+          // Top Control Bar
           Padding(
             padding: const EdgeInsets.all(8.0),
             child: Row(
@@ -230,19 +197,16 @@ class _DashboardPageState extends State<DashboardPage> {
                   ),
                 ),
                 const SizedBox(width: 8),
-                // Search Button
                 ElevatedButton(
                   onPressed: _runSearch,
                   child: const Text("Search TAZ"),
                 ),
                 const SizedBox(width: 8),
-                // Match Zoom Button
                 ElevatedButton(
                   onPressed: _matchZoom,
                   child: const Text("Match Zoom"),
                 ),
                 const SizedBox(width: 16),
-                // Label: "Currently Searching TAZ: ..."
                 Text(
                   _searchLabel,
                   style: const TextStyle(fontWeight: FontWeight.bold),
@@ -250,9 +214,7 @@ class _DashboardPageState extends State<DashboardPage> {
               ],
             ),
           ),
-          // -----------------
-          // MAIN CONTENT
-          // -----------------
+          // Main content
           Expanded(
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -262,37 +224,43 @@ class _DashboardPageState extends State<DashboardPage> {
                   flex: 2,
                   child: Column(
                     children: [
+                      // Top row
                       Expanded(
                         child: Row(
                           children: [
+                            // OLD TAZ (blue line)
                             Expanded(
                               child: MapView(
-                                key: _mapOldKey,
-                                title: "Old TAZ (Green)",
+                                title: "Old TAZ (Blue Outline)",
+                                mode: MapViewMode.oldTaz,
                               ),
                             ),
+                            // NEW TAZ (red line)
                             Expanded(
                               child: MapView(
-                                key: _mapNewKey,
-                                title: "New TAZ (Red)",
+                                title: "New TAZ (Red Outline)",
+                                mode: MapViewMode.newTaz,
                               ),
                             ),
                           ],
                         ),
                       ),
+                      // Bottom row
                       Expanded(
                         child: Row(
                           children: [
+                            // BLOCKS
                             Expanded(
                               child: MapView(
-                                key: _mapCombinedKey,
-                                title: "Combined",
+                                title: "Blocks",
+                                mode: MapViewMode.blocks,
                               ),
                             ),
+                            // COMBINED
                             Expanded(
                               child: MapView(
-                                key: _mapBlocksKey,
-                                title: "Blocks",
+                                title: "Combined",
+                                mode: MapViewMode.combined,
                               ),
                             ),
                           ],
@@ -301,9 +269,9 @@ class _DashboardPageState extends State<DashboardPage> {
                     ],
                   ),
                 ),
-                // Right side: Data Tables in a vertical column
+                // Right side: Data Tables
                 Container(
-                  width: 400, // adjust as needed
+                  width: 400,
                   padding: const EdgeInsets.all(8.0),
                   color: Colors.grey[200],
                   child: Column(
@@ -431,10 +399,20 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 }
 
+/// Identifies which dataset(s) each MapView should display.
+enum MapViewMode {
+  oldTaz,
+  newTaz,
+  blocks,
+  combined,
+}
+
 /// Minimal MapView widget with MapLibre GL
 class MapView extends StatefulWidget {
   final String title;
-  const MapView({Key? key, required this.title}) : super(key: key);
+  final MapViewMode mode;
+  const MapView({Key? key, required this.title, required this.mode})
+      : super(key: key);
 
   @override
   MapViewState createState() => MapViewState();
@@ -442,21 +420,20 @@ class MapView extends StatefulWidget {
 
 class MapViewState extends State<MapView> {
   MaplibreMapController? controller;
+  bool _hasLoadedLayers = false; // So we don't re‐add on style changes
 
   @override
   Widget build(BuildContext context) {
     return Stack(
       children: [
         MaplibreMap(
-          // A public style; you can host your own style if needed
           styleString: 'https://demotiles.maplibre.org/style.json',
           onMapCreated: _onMapCreated,
           initialCameraPosition: const CameraPosition(
-            target: LatLng(39.0, -95.0), // center on US
-            zoom: 4,
+            target: LatLng(39.0, -75.0), // near Delaware
+            zoom: 7,
           ),
-          // 1) This callback fires once the style is fully loaded.
-          onStyleLoadedCallback: _onStyleLoaded, // <-- ADDED
+          onStyleLoadedCallback: _onStyleLoaded,
         ),
         Positioned(
           top: 8,
@@ -474,63 +451,157 @@ class MapViewState extends State<MapView> {
     );
   }
 
-  void _onMapCreated(MaplibreMapController ctrl) async {
+  void _onMapCreated(MaplibreMapController ctrl) {
     controller = ctrl;
-    // If you want to load geojson layers right away after creation,
-    // you can also do it here—but it's often best to wait for onStyleLoaded.
   }
 
-  /// 2) Once the style is loaded, add the GeoJSON source and layer.
+  /// Once the style is loaded, add the relevant layers for this MapView's mode.
   Future<void> _onStyleLoaded() async {
-    if (controller == null) return;
-    try {
-      // Replace with the path to your actual GeoJSON in assets.
-      final String geojsonStr = await rootBundle.loadString(
-        'assets/geojsons/delaware_blocks.geojson',
-      );
-      final Map<String, dynamic> geojsonData = jsonDecode(geojsonStr);
+    if (controller == null || _hasLoadedLayers) return;
+    _hasLoadedLayers = true;
 
-      // Use the existing helper function to add a fill layer.
-      await _addGeoJsonSourceAndLayer(
-        sourceId: 'delaware_blocks_source',
-        layerId: 'delaware_blocks_layer',
-        geojsonData: geojsonData,
-        fillColor: '#FF0000', // for example, red fill
-      );
+    try {
+      // Always load the Delaware blocks (for test reference).
+      // We'll put it first so everything else draws on top of it.
+      await _loadDelaware();
+
+      // Then load the layers for each MapView mode.
+      switch (widget.mode) {
+        case MapViewMode.oldTaz:
+          await _loadOldTazLine();
+          break;
+
+        case MapViewMode.newTaz:
+          await _loadNewTazLine();
+          break;
+
+        case MapViewMode.blocks:
+          // You can choose any fill color you like for blocks alone
+          await _loadBlocksFill(fillColor: "#00FF00", fillOpacity: 0.4);
+          break;
+
+        case MapViewMode.combined:
+          // Overlapping: Old TAZ (blue line), New TAZ (red line), Blocks (yellow fill)
+          await _loadBlocksFill(fillColor: "#FFFF00", fillOpacity: 0.23);
+          await _loadOldTazLine();
+          await _loadNewTazLine();
+          break;
+      }
     } catch (e) {
-      debugPrint("Error adding GeoJSON: $e");
+      debugPrint("Error adding layers in ${widget.mode}: $e");
     }
   }
 
-  /// Example: function to load a GeoJSON source and add a fill layer
-  Future<void> _addGeoJsonSourceAndLayer({
+  /// Always load Delaware blocks as a reference (fill).
+  /// If you prefer an outline only, you could use a line layer instead.
+  Future<void> _loadDelaware() async {
+    if (controller == null) return;
+    final data = await _loadGeoJson('assets/geojsons/delaware_blocks.geojson');
+    const sourceId = "delaware_blocks_src";
+    const layerId = "delaware_blocks_fill";
+    await controller!.addSource(
+      sourceId,
+      GeojsonSourceProperties(data: data),
+    );
+    await controller!.addFillLayer(
+      sourceId,
+      layerId,
+      const FillLayerProperties(
+        fillColor: "#888888",
+        fillOpacity: 0.2,
+      ),
+    );
+  }
+
+  /// Add a line layer for Old TAZ (blue)
+  Future<void> _loadOldTazLine() async {
+    if (controller == null) return;
+    final oldTazData = await _loadGeoJson('assets/geojsons/old_taz.geojson');
+    await _addGeoJsonSourceAndLineLayer(
+      sourceId: "old_taz_source",
+      layerId: "old_taz_line",
+      geojsonData: oldTazData,
+      lineColor: "#0000FF", // blue
+      lineWidth: 2.0,
+    );
+  }
+
+  /// Add a line layer for New TAZ (red)
+  Future<void> _loadNewTazLine() async {
+    if (controller == null) return;
+    final newTazData = await _loadGeoJson('assets/geojsons/new_taz.geojson');
+    await _addGeoJsonSourceAndLineLayer(
+      sourceId: "new_taz_source",
+      layerId: "new_taz_line",
+      geojsonData: newTazData,
+      lineColor: "#FF0000", // red
+      lineWidth: 2.0,
+    );
+  }
+
+  /// Add a fill layer for Blocks
+  Future<void> _loadBlocksFill({
+    required String fillColor,
+    required double fillOpacity,
+  }) async {
+    if (controller == null) return;
+    final blocksData = await _loadGeoJson('assets/geojsons/blocks.geojson');
+    await _addGeoJsonSourceAndFillLayer(
+      sourceId: "blocks_source",
+      layerId: "blocks_fill",
+      geojsonData: blocksData,
+      fillColor: fillColor,
+      fillOpacity: fillOpacity,
+    );
+  }
+
+  /// Reads GeoJSON from assets
+  Future<Map<String, dynamic>> _loadGeoJson(String path) async {
+    final str = await rootBundle.loadString(path);
+    return jsonDecode(str) as Map<String, dynamic>;
+  }
+
+  /// Utility to add a line layer
+  Future<void> _addGeoJsonSourceAndLineLayer({
     required String sourceId,
     required String layerId,
     required Map<String, dynamic> geojsonData,
-    required String fillColor,
+    required String lineColor,
+    double lineWidth = 2.0,
   }) async {
-    if (controller == null) return;
-
-    // Add the source
     await controller!.addSource(
       sourceId,
       GeojsonSourceProperties(data: geojsonData),
     );
+    await controller!.addLineLayer(
+      sourceId,
+      layerId,
+      LineLayerProperties(
+        lineColor: lineColor,
+        lineWidth: lineWidth,
+      ),
+    );
+  }
 
-    // Add a fill layer
+  /// Utility to add a fill layer
+  Future<void> _addGeoJsonSourceAndFillLayer({
+    required String sourceId,
+    required String layerId,
+    required Map<String, dynamic> geojsonData,
+    required String fillColor,
+    double fillOpacity = 0.5,
+  }) async {
+    await controller!.addSource(
+      sourceId,
+      GeojsonSourceProperties(data: geojsonData),
+    );
     await controller!.addFillLayer(
       sourceId,
       layerId,
       FillLayerProperties(
         fillColor: fillColor,
-        fillOpacity: 0.6,
+        fillOpacity: fillOpacity,
       ),
     );
-  }
-
-  /// Example: function to set a layer's visibility
-  Future<void> toggleLayerVisibility(String layerId, bool visible) async {
-    if (controller == null) return;
-    await controller!.setLayerVisibility(layerId, visible);
   }
 }
