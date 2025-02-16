@@ -868,7 +868,8 @@ class MapViewState extends State<MapView> {
       final sw = LatLng(minLat, minLng);
       final ne = LatLng(maxLat, maxLng);
       final bounds = LatLngBounds(southwest: sw, northeast: ne);
-      await controller!.animateCamera(
+      // Instead of animating, move the camera immediately.
+      controller!.moveCamera(
         CameraUpdate.newLatLngBounds(bounds,
             left: 50, right: 50, top: 50, bottom: 50),
       );
