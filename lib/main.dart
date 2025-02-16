@@ -80,7 +80,6 @@ Map<String, dynamic> standardizeGeoJsonProperties(
           newProps['taz_id'] = newProps['taz_id0'];
           newProps.remove('taz_id0');
         } else if (newProps.containsKey('taz_new1')) {
-          // If no 'taz_id0' is present, try 'taz_new1'
           newProps['taz_id'] = newProps['taz_new1'];
           newProps.remove('taz_new1');
         }
@@ -267,55 +266,9 @@ class _DashboardPageState extends State<DashboardPage> {
       _searchLabel = "Currently Searching TAZ: $tazId";
       _hasSearched = true;
       _selectedTazId = tazId;
-      // Dummy table updates.
-      _newTazTableData = [
-        {
-          "id": tazId,
-          "hh19": 123,
-          "persns19": 456,
-          "workrs19": 78,
-          "emp19": 999,
-          "hh49": 140,
-          "persns49": 490,
-          "workrs49": 90,
-          "emp49": 1200
-        },
-        {
-          "id": 999,
-          "hh19": 321,
-          "persns19": 654,
-          "workrs19": 87,
-          "emp19": 555,
-          "hh49": 130,
-          "persns49": 410,
-          "workrs49": 100,
-          "emp49": 1100
-        },
-      ];
-      _blocksTableData = [
-        {
-          "id": "BlockA",
-          "hh19": 50,
-          "persns19": 120,
-          "workrs19": 30,
-          "emp19": 220,
-          "hh49": 80,
-          "persns49": 200,
-          "workrs49": 35,
-          "emp49": 300
-        },
-        {
-          "id": "BlockB",
-          "hh19": 70,
-          "persns19": 180,
-          "workrs19": 40,
-          "emp19": 300,
-          "hh49": 90,
-          "persns49": 240,
-          "workrs49": 42,
-          "emp49": 360
-        },
-      ];
+      // Removed dummy table updates.
+      _newTazTableData = [];
+      _blocksTableData = [];
     });
   }
 
