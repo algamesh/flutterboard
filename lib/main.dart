@@ -6,14 +6,10 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:maplibre_gl/maplibre_gl.dart';
-
 import 'package:turf/turf.dart' as turf;
 import 'package:r_tree/r_tree.dart';
 
 /// Helper: Generate a GeoJSON polygon approximating a circle.
-/// [center] is a turf.Point (with coordinates as [lng, lat]).
-/// [radius] is in kilometers.
-/// [steps] is the number of vertices to use.
 Map<String, dynamic> createCirclePolygon(turf.Point center, double radius,
     {int steps = 64}) {
   final List<List<double>> coordinates = [];
@@ -104,7 +100,6 @@ class DashboardPage extends StatefulWidget {
 class _DashboardPageState extends State<DashboardPage> {
   // Controllers for user input.
   final TextEditingController _searchController = TextEditingController();
-  // Also using a text controller for the editable radius.
   final TextEditingController _radiusController =
       TextEditingController(text: "1000");
   String _searchLabel = "Currently Searching TAZ: (none)";
@@ -685,13 +680,13 @@ class MapViewState extends State<MapView> {
         await _loadOldTazLayers();
         await _loadRadiusCircle();
       } else if (widget.mode == MapViewMode.newTaz) {
-        await _loadNewTazLine();
+        await _loadNewTazLayers();
       } else if (widget.mode == MapViewMode.blocks) {
         await _loadBlocksFill();
       } else if (widget.mode == MapViewMode.combined) {
         final blocksData = await _loadBlocksFill(zoom: false);
         final oldData = await _loadOldTazLayers(zoom: false);
-        final newData = await _loadNewTazLine(zoom: false);
+        final newData = await _loadNewTazLayers(zoom: false);
         await _loadRadiusCircle();
         List<dynamic> allFeatures = [];
         if (blocksData != null && blocksData['features'] != null) {
@@ -719,8 +714,8 @@ class MapViewState extends State<MapView> {
 
   /// Loads all old TAZ features within the search radius.
   /// Splits them into two groups:
-  /// - Target (selectedTazId): blue outline.
-  /// - Others: purple outline.
+  /// - Target (selectedTazId): blue outline and blue fill.
+  /// - Others: purple outline and purple fill.
   Future<Map<String, dynamic>?> _loadOldTazLayers({bool zoom = true}) async {
     if (controller == null ||
         widget.selectedTazId == null ||
@@ -775,7 +770,7 @@ class MapViewState extends State<MapView> {
       'features': withinFeatures,
     };
 
-    // Add target layer (blue).
+    // Add target layer (blue) line.
     await _addGeoJsonSourceAndLineLayer(
       sourceId: "old_taz_target_source",
       layerId: "old_taz_target_line",
@@ -783,7 +778,7 @@ class MapViewState extends State<MapView> {
       lineColor: "#0000FF",
       lineWidth: 2.0,
     );
-    // Add others layer (purple).
+    // Add others layer (purple) line.
     await _addGeoJsonSourceAndLineLayer(
       sourceId: "old_taz_others_source",
       layerId: "old_taz_others_line",
@@ -791,12 +786,29 @@ class MapViewState extends State<MapView> {
       lineColor: "#800080",
       lineWidth: 2.0,
     );
+    // Add blue target fill with 0.18 alpha.
+    await _addGeoJsonSourceAndFillLayer(
+      sourceId: "old_taz_target_fill_source",
+      layerId: "old_taz_target_fill",
+      geojsonData: {'type': 'FeatureCollection', 'features': targetFeatures},
+      fillColor: "#0000FF",
+      fillOpacity: 0.18,
+    );
+    // Add purple others fill with 0.18 alpha.
+    await _addGeoJsonSourceAndFillLayer(
+      sourceId: "old_taz_others_fill_source",
+      layerId: "old_taz_others_fill",
+      geojsonData: {'type': 'FeatureCollection', 'features': otherFeatures},
+      fillColor: "#800080",
+      fillOpacity: 0.18,
+    );
 
     if (zoom) await _zoomToFeatureBounds(combinedData);
     return combinedData;
   }
 
-  Future<Map<String, dynamic>?> _loadNewTazLine({bool zoom = true}) async {
+  /// Loads new TAZ features and adds a red line and fill (0.18 alpha).
+  Future<Map<String, dynamic>?> _loadNewTazLayers({bool zoom = true}) async {
     if (controller == null ||
         widget.selectedTazId == null ||
         widget.radius == null) return null;
@@ -837,12 +849,21 @@ class MapViewState extends State<MapView> {
       'type': 'FeatureCollection',
       'features': filteredNewFeatures
     };
+    // Add red line layer.
     await _addGeoJsonSourceAndLineLayer(
       sourceId: "new_taz_source",
       layerId: "new_taz_line",
       geojsonData: filteredNewData,
       lineColor: "#FF0000",
       lineWidth: 2.0,
+    );
+    // Add red fill layer with 0.18 alpha.
+    await _addGeoJsonSourceAndFillLayer(
+      sourceId: "new_taz_fill_source",
+      layerId: "new_taz_fill",
+      geojsonData: filteredNewData,
+      fillColor: "#FF0000",
+      fillOpacity: 0.18,
     );
     if (zoom) await _zoomToFeatureBounds(filteredNewData);
     return filteredNewData;
@@ -968,6 +989,19 @@ class MapViewState extends State<MapView> {
         .addSource(sourceId, GeojsonSourceProperties(data: geojsonData));
     await controller!.addLineLayer(sourceId, layerId,
         LineLayerProperties(lineColor: lineColor, lineWidth: lineWidth));
+  }
+
+  Future<void> _addGeoJsonSourceAndFillLayer({
+    required String sourceId,
+    required String layerId,
+    required Map<String, dynamic> geojsonData,
+    required String fillColor,
+    double fillOpacity = 0.18,
+  }) async {
+    await controller!
+        .addSource(sourceId, GeojsonSourceProperties(data: geojsonData));
+    await controller!.addFillLayer(sourceId, layerId,
+        FillLayerProperties(fillColor: fillColor, fillOpacity: fillOpacity));
   }
 
   Future<void> _zoomToFeatureBounds(
