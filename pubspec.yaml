@@ -10,9 +10,8 @@ dependencies:
   flutter:
     sdk: flutter
   maplibre_gl: ^0.20.0
-  # If you want to read shapefiles *directly* in Flutter, you might add:
   # flutter_geokit: ^0.1.5
-  # (But we've already converted them in Python.)
+  turf: ^0.0.10
 
 dev_dependencies:
   flutter_test:

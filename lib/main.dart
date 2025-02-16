@@ -77,12 +77,20 @@ class _DashboardPageState extends State<DashboardPage> {
   // Example data for the "Blocks" table
   List<Map<String, dynamic>> _blocksTableData = [];
 
+  // Flag indicating a valid TAZ search has been conducted.
+  bool _hasSearched = false;
+
+  // Store the TAZ ID we want to display
+  int? _selectedTazId;
+
   // Called when the user presses "Search TAZ"
   void _runSearch() {
     final tazIdStr = _searchController.text.trim();
     if (tazIdStr.isEmpty) {
       setState(() {
         _searchLabel = "Currently Searching TAZ: (none)";
+        _hasSearched = false;
+        _selectedTazId = null;
       });
       return;
     }
@@ -91,17 +99,18 @@ class _DashboardPageState extends State<DashboardPage> {
     if (tazId == null) {
       setState(() {
         _searchLabel = "Currently Searching TAZ: (invalid ID)";
+        _hasSearched = false;
+        _selectedTazId = null;
       });
       return;
     }
 
-    final radius = double.tryParse(_radiusController.text.trim()) ?? 1000;
-
     setState(() {
       _searchLabel = "Currently Searching TAZ: $tazId";
+      _hasSearched = true;
+      _selectedTazId = tazId;
 
-      // TODO: Real logic to buffer & filter polygons
-      // For now, just updating dummy table data.
+      // Dummy data update for tables:
       _newTazTableData = [
         {
           "id": tazId,
@@ -228,18 +237,24 @@ class _DashboardPageState extends State<DashboardPage> {
                       Expanded(
                         child: Row(
                           children: [
-                            // OLD TAZ (blue line)
+                            // OLD TAZ (blue line) – only panel that draws shapes.
+                            // A unique key is provided so that when _selectedTazId changes,
+                            // this widget is rebuilt and loads new layers.
                             Expanded(
                               child: MapView(
+                                key: ValueKey<int?>(_selectedTazId),
                                 title: "Old TAZ (Blue Outline)",
                                 mode: MapViewMode.oldTaz,
+                                drawShapes: _hasSearched,
+                                selectedTazId: _selectedTazId,
                               ),
                             ),
-                            // NEW TAZ (red line)
+                            // NEW TAZ (red line) – not drawn.
                             Expanded(
                               child: MapView(
                                 title: "New TAZ (Red Outline)",
                                 mode: MapViewMode.newTaz,
+                                drawShapes: false,
                               ),
                             ),
                           ],
@@ -249,18 +264,20 @@ class _DashboardPageState extends State<DashboardPage> {
                       Expanded(
                         child: Row(
                           children: [
-                            // BLOCKS
+                            // BLOCKS – not drawn.
                             Expanded(
                               child: MapView(
                                 title: "Blocks",
                                 mode: MapViewMode.blocks,
+                                drawShapes: false,
                               ),
                             ),
-                            // COMBINED
+                            // COMBINED – not drawn.
                             Expanded(
                               child: MapView(
                                 title: "Combined",
                                 mode: MapViewMode.combined,
+                                drawShapes: false,
                               ),
                             ),
                           ],
@@ -407,12 +424,22 @@ enum MapViewMode {
   combined,
 }
 
-/// Minimal MapView widget with MapLibre GL
+/// Minimal MapView widget with MapLibre GL.
+/// The [drawShapes] flag controls whether the map should load its GeoJSON layers,
+/// and [selectedTazId] is used to filter the old_taz layer.
 class MapView extends StatefulWidget {
   final String title;
   final MapViewMode mode;
-  const MapView({Key? key, required this.title, required this.mode})
-      : super(key: key);
+  final bool drawShapes;
+  final int? selectedTazId;
+
+  const MapView({
+    Key? key,
+    required this.title,
+    required this.mode,
+    required this.drawShapes,
+    this.selectedTazId,
+  }) : super(key: key);
 
   @override
   MapViewState createState() => MapViewState();
@@ -420,7 +447,16 @@ class MapView extends StatefulWidget {
 
 class MapViewState extends State<MapView> {
   MaplibreMapController? controller;
-  bool _hasLoadedLayers = false; // So we don't re‐add on style changes
+  bool _hasLoadedLayers = false; // So we don't re‐add layers unnecessarily
+
+  @override
+  void didUpdateWidget(covariant MapView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // If drawShapes becomes true and layers haven't been loaded, then load them.
+    if (widget.drawShapes && !_hasLoadedLayers && controller != null) {
+      _loadLayers();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -455,104 +491,70 @@ class MapViewState extends State<MapView> {
     controller = ctrl;
   }
 
-  /// Once the style is loaded, add the relevant layers for this MapView's mode.
+  /// Called when the style is loaded.
   Future<void> _onStyleLoaded() async {
-    if (controller == null || _hasLoadedLayers) return;
-    _hasLoadedLayers = true;
-
-    try {
-      // Always load the Delaware blocks (for test reference).
-      // We'll put it first so everything else draws on top of it.
-      await _loadDelaware();
-
-      // Then load the layers for each MapView mode.
-      switch (widget.mode) {
-        case MapViewMode.oldTaz:
-          await _loadOldTazLine();
-          break;
-
-        case MapViewMode.newTaz:
-          await _loadNewTazLine();
-          break;
-
-        case MapViewMode.blocks:
-          // You can choose any fill color you like for blocks alone
-          await _loadBlocksFill(fillColor: "#00FF00", fillOpacity: 0.4);
-          break;
-
-        case MapViewMode.combined:
-          // Overlapping: Old TAZ (blue line), New TAZ (red line), Blocks (yellow fill)
-          await _loadBlocksFill(fillColor: "#FFFF00", fillOpacity: 0.23);
-          await _loadOldTazLine();
-          await _loadNewTazLine();
-          break;
-      }
-    } catch (e) {
-      debugPrint("Error adding layers in ${widget.mode}: $e");
+    if (widget.drawShapes && !_hasLoadedLayers) {
+      await _loadLayers();
     }
   }
 
-  /// Always load Delaware blocks as a reference (fill).
-  /// If you prefer an outline only, you could use a line layer instead.
-  Future<void> _loadDelaware() async {
+  Future<void> _loadLayers() async {
     if (controller == null) return;
-    final data = await _loadGeoJson('assets/geojsons/delaware_blocks.geojson');
-    const sourceId = "delaware_blocks_src";
-    const layerId = "delaware_blocks_fill";
-    await controller!.addSource(
-      sourceId,
-      GeojsonSourceProperties(data: data),
-    );
-    await controller!.addFillLayer(
-      sourceId,
-      layerId,
-      const FillLayerProperties(
-        fillColor: "#888888",
-        fillOpacity: 0.2,
-      ),
-    );
+
+    // We only load layers for the Old TAZ (top‐left) map.
+    if (widget.mode == MapViewMode.oldTaz) {
+      try {
+        // Load only the TAZ that matches the user's input.
+        await _loadOldTazLine();
+        _hasLoadedLayers = true;
+      } catch (e) {
+        debugPrint("Error loading layers for ${widget.mode}: $e");
+      }
+    }
   }
 
-  /// Add a line layer for Old TAZ (blue)
+  /// Add a line layer for the *single* Old TAZ the user searched for
   Future<void> _loadOldTazLine() async {
     if (controller == null) return;
+
+    // 1. Load the entire old_taz.geojson
     final oldTazData = await _loadGeoJson('assets/geojsons/old_taz.geojson');
-    await _addGeoJsonSourceAndLineLayer(
-      sourceId: "old_taz_source",
-      layerId: "old_taz_line",
-      geojsonData: oldTazData,
-      lineColor: "#0000FF", // blue
-      lineWidth: 2.0,
-    );
-  }
 
-  /// Add a line layer for New TAZ (red)
-  Future<void> _loadNewTazLine() async {
-    if (controller == null) return;
-    final newTazData = await _loadGeoJson('assets/geojsons/new_taz.geojson');
-    await _addGeoJsonSourceAndLineLayer(
-      sourceId: "new_taz_source",
-      layerId: "new_taz_line",
-      geojsonData: newTazData,
-      lineColor: "#FF0000", // red
-      lineWidth: 2.0,
-    );
-  }
+    // 2. Filter out all but the selected TAZ.
+    // Note: Using 'taz_id' (all lowercase) to match the GeoJSON data.
+    if (widget.selectedTazId != null) {
+      final List<dynamic> allFeatures = oldTazData['features'] as List<dynamic>;
 
-  /// Add a fill layer for Blocks
-  Future<void> _loadBlocksFill({
-    required String fillColor,
-    required double fillOpacity,
-  }) async {
-    if (controller == null) return;
-    final blocksData = await _loadGeoJson('assets/geojsons/blocks.geojson');
-    await _addGeoJsonSourceAndFillLayer(
-      sourceId: "blocks_source",
-      layerId: "blocks_fill",
-      geojsonData: blocksData,
-      fillColor: fillColor,
-      fillOpacity: fillOpacity,
-    );
+      final filteredFeatures = allFeatures.where((feature) {
+        final props = feature['properties'] as Map<String, dynamic>;
+        final propValue = props['taz_id']?.toString() ?? '';
+        return propValue == widget.selectedTazId.toString();
+      }).toList();
+
+      debugPrint("All features: ${allFeatures.length}");
+      debugPrint("Filtered features: ${filteredFeatures.length}");
+
+      if (filteredFeatures.isEmpty) {
+        debugPrint("No TAZ found matching ID ${widget.selectedTazId}.");
+        return;
+      }
+
+      final filteredData = <String, dynamic>{
+        'type': 'FeatureCollection',
+        'features': filteredFeatures,
+      };
+
+      await _addGeoJsonSourceAndLineLayer(
+        sourceId: "old_taz_source",
+        layerId: "old_taz_line",
+        geojsonData: filteredData,
+        lineColor: "#0000FF", // blue
+        lineWidth: 2.0,
+      );
+
+      // Optionally, zoom to the feature bounds.
+      await _zoomToFeatureBounds(filteredData);
+    }
   }
 
   /// Reads GeoJSON from assets
@@ -583,25 +585,54 @@ class MapViewState extends State<MapView> {
     );
   }
 
-  /// Utility to add a fill layer
-  Future<void> _addGeoJsonSourceAndFillLayer({
-    required String sourceId,
-    required String layerId,
-    required Map<String, dynamic> geojsonData,
-    required String fillColor,
-    double fillOpacity = 0.5,
-  }) async {
-    await controller!.addSource(
-      sourceId,
-      GeojsonSourceProperties(data: geojsonData),
-    );
-    await controller!.addFillLayer(
-      sourceId,
-      layerId,
-      FillLayerProperties(
-        fillColor: fillColor,
-        fillOpacity: fillOpacity,
-      ),
-    );
+  /// Zoom to the bounds of the provided feature collection.
+  Future<void> _zoomToFeatureBounds(
+      Map<String, dynamic> featureCollection) async {
+    if (controller == null) return;
+
+    double? minLat, maxLat, minLng, maxLng;
+    final features = featureCollection['features'] as List<dynamic>;
+    for (final f in features) {
+      final geometry = f['geometry'] as Map<String, dynamic>;
+      final coords = geometry['coordinates'];
+      final geomType = geometry['type'];
+
+      if (geomType == 'Polygon') {
+        for (final ring in coords) {
+          for (final point in ring) {
+            final lng = point[0] as double;
+            final lat = point[1] as double;
+            minLat = (minLat == null) ? lat : (lat < minLat ? lat : minLat);
+            maxLat = (maxLat == null) ? lat : (lat > maxLat ? lat : maxLat);
+            minLng = (minLng == null) ? lng : (lng < minLng ? lng : minLng);
+            maxLng = (maxLng == null) ? lng : (lng > maxLng ? lng : maxLng);
+          }
+        }
+      } else if (geomType == 'MultiPolygon') {
+        for (final polygon in coords) {
+          for (final ring in polygon) {
+            for (final point in ring) {
+              final lng = point[0] as double;
+              final lat = point[1] as double;
+              minLat = (minLat == null) ? lat : (lat < minLat ? lat : minLat);
+              maxLat = (maxLat == null) ? lat : (lat > maxLat ? lat : maxLat);
+              minLng = (minLng == null) ? lng : (lng < minLng ? lng : minLng);
+              maxLng = (maxLng == null) ? lng : (lng > maxLng ? lng : maxLng);
+            }
+          }
+        }
+      }
+    }
+
+    if (minLat != null && maxLat != null && minLng != null && maxLng != null) {
+      final sw = LatLng(minLat, minLng);
+      final ne = LatLng(maxLat, maxLng);
+      final bounds = LatLngBounds(southwest: sw, northeast: ne);
+
+      await controller!.animateCamera(
+        CameraUpdate.newLatLngBounds(bounds,
+            left: 50, right: 50, top: 50, bottom: 50),
+      );
+    }
   }
 }
