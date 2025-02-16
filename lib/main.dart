@@ -5,6 +5,8 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:maplibre_gl/maplibre_gl.dart';
+// Make sure to add turf_dart to your pubspec.yaml.
+import 'package:turf/turf.dart' as turf;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -17,7 +19,7 @@ Future<void> main() async {
   runApp(const MyApp());
 }
 
-/// Injects MapLibre CSS & JS
+/// Injects MapLibre CSS & JS.
 Future<void> injectMapLibreScripts() async {
   // CSS
   final html.LinkElement link = html.LinkElement()
@@ -57,7 +59,7 @@ class MyApp extends StatelessWidget {
   }
 }
 
-/// The Dashboard Page – multi‐panel layout
+/// The Dashboard Page – multi‐panel layout.
 class DashboardPage extends StatefulWidget {
   const DashboardPage({Key? key}) : super(key: key);
 
@@ -66,24 +68,23 @@ class DashboardPage extends StatefulWidget {
 }
 
 class _DashboardPageState extends State<DashboardPage> {
-  // Controllers for user input
+  // Controllers for user input.
   final TextEditingController _searchController = TextEditingController();
   final TextEditingController _radiusController =
       TextEditingController(text: "1000");
   String _searchLabel = "Currently Searching TAZ: (none)";
 
-  // Example data for the "New TAZ" table
+  // Dummy table data.
   List<Map<String, dynamic>> _newTazTableData = [];
-  // Example data for the "Blocks" table
   List<Map<String, dynamic>> _blocksTableData = [];
 
-  // Flag indicating a valid TAZ search has been conducted.
+  // Indicates whether a valid search has been conducted.
   bool _hasSearched = false;
 
-  // Store the TAZ ID we want to display
+  // The TAZ ID selected (for the old TAZ).
   int? _selectedTazId;
 
-  // Called when the user presses "Search TAZ"
+  // Called when the user presses "Search TAZ".
   void _runSearch() {
     final tazIdStr = _searchController.text.trim();
     if (tazIdStr.isEmpty) {
@@ -110,7 +111,7 @@ class _DashboardPageState extends State<DashboardPage> {
       _hasSearched = true;
       _selectedTazId = tazId;
 
-      // Dummy data update for tables:
+      // Dummy table updates.
       _newTazTableData = [
         {
           "id": tazId,
@@ -162,9 +163,8 @@ class _DashboardPageState extends State<DashboardPage> {
     });
   }
 
-  // Example function to sync zoom across maps (optional)
   Future<void> _matchZoom() async {
-    // ...
+    // Optional: implement syncing zoom.
   }
 
   @override
@@ -175,12 +175,11 @@ class _DashboardPageState extends State<DashboardPage> {
       ),
       body: Column(
         children: [
-          // Top Control Bar
+          // Top Control Bar.
           Padding(
             padding: const EdgeInsets.all(8.0),
             child: Row(
               children: [
-                // TAZ ID input
                 SizedBox(
                   width: 120,
                   child: TextField(
@@ -193,7 +192,6 @@ class _DashboardPageState extends State<DashboardPage> {
                   ),
                 ),
                 const SizedBox(width: 8),
-                // Radius input
                 SizedBox(
                   width: 100,
                   child: TextField(
@@ -223,23 +221,22 @@ class _DashboardPageState extends State<DashboardPage> {
               ],
             ),
           ),
-          // Main content
+          // Main Content.
           Expanded(
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Left side: 2×2 grid of maps
+                // Left side: 2×2 grid of maps.
                 Expanded(
                   flex: 2,
                   child: Column(
                     children: [
-                      // Top row
+                      // Top row.
                       Expanded(
                         child: Row(
                           children: [
-                            // OLD TAZ (blue line) – only panel that draws shapes.
-                            // A unique key is provided so that when _selectedTazId changes,
-                            // this widget is rebuilt and loads new layers.
+                            // OLD TAZ (Blue Outline) – top left.
+                            // A unique key forces a rebuild when _selectedTazId changes.
                             Expanded(
                               child: MapView(
                                 key: ValueKey<int?>(_selectedTazId),
@@ -249,18 +246,22 @@ class _DashboardPageState extends State<DashboardPage> {
                                 selectedTazId: _selectedTazId,
                               ),
                             ),
-                            // NEW TAZ (red line) – not drawn.
+                            // NEW TAZ (Red Outline) – top right.
+                            // Also receives the selectedTazId so it can filter by intersection.
                             Expanded(
                               child: MapView(
+                                key:
+                                    ValueKey("new_${_selectedTazId ?? 'none'}"),
                                 title: "New TAZ (Red Outline)",
                                 mode: MapViewMode.newTaz,
-                                drawShapes: false,
+                                drawShapes: _hasSearched,
+                                selectedTazId: _selectedTazId,
                               ),
                             ),
                           ],
                         ),
                       ),
-                      // Bottom row
+                      // Bottom row.
                       Expanded(
                         child: Row(
                           children: [
@@ -286,7 +287,7 @@ class _DashboardPageState extends State<DashboardPage> {
                     ],
                   ),
                 ),
-                // Right side: Data Tables
+                // Right side: Data Tables.
                 Container(
                   width: 400,
                   padding: const EdgeInsets.all(8.0),
@@ -416,7 +417,7 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 }
 
-/// Identifies which dataset(s) each MapView should display.
+/// Enum to define which dataset(s) each MapView should display.
 enum MapViewMode {
   oldTaz,
   newTaz,
@@ -425,8 +426,8 @@ enum MapViewMode {
 }
 
 /// Minimal MapView widget with MapLibre GL.
-/// The [drawShapes] flag controls whether the map should load its GeoJSON layers,
-/// and [selectedTazId] is used to filter the old_taz layer.
+/// The [drawShapes] flag controls whether the map should load its GeoJSON layers.
+/// [selectedTazId] is used by both oldTaz and newTaz modes.
 class MapView extends StatefulWidget {
   final String title;
   final MapViewMode mode;
@@ -447,12 +448,12 @@ class MapView extends StatefulWidget {
 
 class MapViewState extends State<MapView> {
   MaplibreMapController? controller;
-  bool _hasLoadedLayers = false; // So we don't re‐add layers unnecessarily
+  bool _hasLoadedLayers = false; // Prevent re‐adding layers unnecessarily.
 
   @override
   void didUpdateWidget(covariant MapView oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // If drawShapes becomes true and layers haven't been loaded, then load them.
+    // When drawShapes becomes true and layers haven't been loaded, load them.
     if (widget.drawShapes && !_hasLoadedLayers && controller != null) {
       _loadLayers();
     }
@@ -466,7 +467,7 @@ class MapViewState extends State<MapView> {
           styleString: 'https://demotiles.maplibre.org/style.json',
           onMapCreated: _onMapCreated,
           initialCameraPosition: const CameraPosition(
-            target: LatLng(39.0, -75.0), // near Delaware
+            target: LatLng(39.0, -75.0),
             zoom: 7,
           ),
           onStyleLoadedCallback: _onStyleLoaded,
@@ -491,7 +492,6 @@ class MapViewState extends State<MapView> {
     controller = ctrl;
   }
 
-  /// Called when the style is loaded.
   Future<void> _onStyleLoaded() async {
     if (widget.drawShapes && !_hasLoadedLayers) {
       await _loadLayers();
@@ -501,69 +501,113 @@ class MapViewState extends State<MapView> {
   Future<void> _loadLayers() async {
     if (controller == null) return;
 
-    // We only load layers for the Old TAZ (top‐left) map.
-    if (widget.mode == MapViewMode.oldTaz) {
-      try {
-        // Load only the TAZ that matches the user's input.
+    try {
+      if (widget.mode == MapViewMode.oldTaz) {
+        // For oldTaz mode, load only the selected old TAZ.
         await _loadOldTazLine();
-        _hasLoadedLayers = true;
-      } catch (e) {
-        debugPrint("Error loading layers for ${widget.mode}: $e");
+      } else if (widget.mode == MapViewMode.newTaz) {
+        // For newTaz mode, load new TAZ features that intersect the selected old TAZ.
+        await _loadNewTazLine();
       }
+      _hasLoadedLayers = true;
+    } catch (e) {
+      debugPrint("Error loading layers for ${widget.mode}: $e");
     }
   }
 
-  /// Add a line layer for the *single* Old TAZ the user searched for
+  /// Loads a line layer for the selected Old TAZ.
   Future<void> _loadOldTazLine() async {
     if (controller == null) return;
-
-    // 1. Load the entire old_taz.geojson
     final oldTazData = await _loadGeoJson('assets/geojsons/old_taz.geojson');
-
-    // 2. Filter out all but the selected TAZ.
-    // Note: Using 'taz_id' (all lowercase) to match the GeoJSON data.
     if (widget.selectedTazId != null) {
       final List<dynamic> allFeatures = oldTazData['features'] as List<dynamic>;
-
       final filteredFeatures = allFeatures.where((feature) {
         final props = feature['properties'] as Map<String, dynamic>;
         final propValue = props['taz_id']?.toString() ?? '';
         return propValue == widget.selectedTazId.toString();
       }).toList();
-
-      debugPrint("All features: ${allFeatures.length}");
-      debugPrint("Filtered features: ${filteredFeatures.length}");
-
+      debugPrint(
+          "Old TAZ: All features: ${allFeatures.length}, Filtered: ${filteredFeatures.length}");
       if (filteredFeatures.isEmpty) {
-        debugPrint("No TAZ found matching ID ${widget.selectedTazId}.");
+        debugPrint("No old TAZ found matching ID ${widget.selectedTazId}.");
         return;
       }
-
-      final filteredData = <String, dynamic>{
+      final filteredData = {
         'type': 'FeatureCollection',
         'features': filteredFeatures,
       };
-
       await _addGeoJsonSourceAndLineLayer(
         sourceId: "old_taz_source",
         layerId: "old_taz_line",
         geojsonData: filteredData,
-        lineColor: "#0000FF", // blue
+        lineColor: "#0000FF",
         lineWidth: 2.0,
       );
-
-      // Optionally, zoom to the feature bounds.
       await _zoomToFeatureBounds(filteredData);
     }
   }
 
-  /// Reads GeoJSON from assets
+  /// Loads a line layer for new TAZ features that intersect the selected old TAZ.
+  Future<void> _loadNewTazLine() async {
+    if (controller == null || widget.selectedTazId == null) return;
+
+    // 1. Load the old TAZ GeoJSON and filter for the selected TAZ.
+    final oldTazData = await _loadGeoJson('assets/geojsons/old_taz.geojson');
+    final List<dynamic> oldFeatures = oldTazData['features'] as List<dynamic>;
+    final oldFeature = oldFeatures.firstWhere(
+      (f) =>
+          (f['properties'] as Map<String, dynamic>)['taz_id']?.toString() ==
+          widget.selectedTazId.toString(),
+      orElse: () => null,
+    );
+    if (oldFeature == null) {
+      debugPrint("No old TAZ found for selected ID ${widget.selectedTazId}");
+      return;
+    }
+    // Convert the old feature to a Turf feature (without generic type).
+    final turf.Feature turfOld = turf.Feature.fromJson(oldFeature);
+
+    // 2. Load the new TAZ GeoJSON.
+    final newTazData = await _loadGeoJson('assets/geojsons/new_taz.geojson');
+    final List<dynamic> newFeatures = newTazData['features'] as List<dynamic>;
+
+    // 3. Filter new TAZ features by intersection.
+    final filteredNewFeatures = newFeatures.where((feature) {
+      final turf.Feature turfNew = turf.Feature.fromJson(feature);
+      // Use Turf's booleanIntersects function.
+      return turf.booleanIntersects(turfOld, turfNew);
+    }).toList();
+
+    debugPrint(
+        "New TAZ: All features: ${newFeatures.length}, Filtered: ${filteredNewFeatures.length}");
+
+    if (filteredNewFeatures.isEmpty) {
+      debugPrint("No new TAZ features intersect the selected old TAZ.");
+      return;
+    }
+
+    final filteredNewData = {
+      'type': 'FeatureCollection',
+      'features': filteredNewFeatures,
+    };
+
+    await _addGeoJsonSourceAndLineLayer(
+      sourceId: "new_taz_source",
+      layerId: "new_taz_line",
+      geojsonData: filteredNewData,
+      lineColor: "#FF0000",
+      lineWidth: 2.0,
+    );
+    await _zoomToFeatureBounds(filteredNewData);
+  }
+
+  /// Reads GeoJSON from assets.
   Future<Map<String, dynamic>> _loadGeoJson(String path) async {
     final str = await rootBundle.loadString(path);
     return jsonDecode(str) as Map<String, dynamic>;
   }
 
-  /// Utility to add a line layer
+  /// Utility to add a line layer.
   Future<void> _addGeoJsonSourceAndLineLayer({
     required String sourceId,
     required String layerId,
@@ -585,7 +629,7 @@ class MapViewState extends State<MapView> {
     );
   }
 
-  /// Zoom to the bounds of the provided feature collection.
+  /// Zooms to the bounds of the provided feature collection.
   Future<void> _zoomToFeatureBounds(
       Map<String, dynamic> featureCollection) async {
     if (controller == null) return;
@@ -628,7 +672,6 @@ class MapViewState extends State<MapView> {
       final sw = LatLng(minLat, minLng);
       final ne = LatLng(maxLat, maxLng);
       final bounds = LatLngBounds(southwest: sw, northeast: ne);
-
       await controller!.animateCamera(
         CameraUpdate.newLatLngBounds(bounds,
             left: 50, right: 50, top: 50, bottom: 50),
