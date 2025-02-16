@@ -10,6 +10,10 @@ import 'package:maplibre_gl/maplibre_gl.dart';
 import 'package:turf/turf.dart' as turf;
 import 'package:r_tree/r_tree.dart';
 
+/// Helper: Generate a GeoJSON polygon approximating a circle.
+/// [center] is a turf.Point (with coordinates as [lng, lat]).
+/// [radius] is in kilometers.
+/// [steps] is the number of vertices to use.
 Map<String, dynamic> createCirclePolygon(turf.Point center, double radius,
     {int steps = 64}) {
   final List<List<double>> coordinates = [];
@@ -100,7 +104,7 @@ class DashboardPage extends StatefulWidget {
 class _DashboardPageState extends State<DashboardPage> {
   // Controllers for user input.
   final TextEditingController _searchController = TextEditingController();
-  // (Optional) You can remove the radius text field if you prefer the slider.
+  // Also using a text controller for the editable radius.
   final TextEditingController _radiusController =
       TextEditingController(text: "1000");
   String _searchLabel = "Currently Searching TAZ: (none)";
@@ -259,8 +263,8 @@ class _DashboardPageState extends State<DashboardPage> {
     });
   }
 
-  /// A slider widget to change the radius interactively.
-  Widget _buildRadiusSlider() {
+  /// An editable slider+number field widget for radius.
+  Widget _buildRadiusControl() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8.0),
       child: Row(
@@ -277,12 +281,41 @@ class _DashboardPageState extends State<DashboardPage> {
               onChanged: (value) {
                 setState(() {
                   _radius = value;
-                  // As _radius updates, maps will refresh.
+                  _radiusController.text = value.round().toString();
                 });
               },
             ),
           ),
-          Text("${_radius.round()} m"),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 80,
+            child: TextField(
+              controller: _radiusController,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+              ),
+              // Instead of updating on every change, update when editing completes.
+              onEditingComplete: () {
+                double? newVal = double.tryParse(_radiusController.text);
+                if (newVal == null) {
+                  newVal = 500; // default if parsing fails
+                }
+                // Clamp value to be between 500 and 5000.
+                if (newVal < 500) {
+                  newVal = 500;
+                } else if (newVal > 5000) {
+                  newVal = 5000;
+                }
+                setState(() {
+                  _radius = newVal!;
+                  _radiusController.text = newVal.round().toString();
+                });
+              },
+            ),
+          ),
+          const SizedBox(width: 4),
+          const Text("m"),
         ],
       ),
     );
@@ -317,7 +350,7 @@ class _DashboardPageState extends State<DashboardPage> {
                   ),
                 ),
                 const SizedBox(width: 8),
-                // (Optional) Radius text field.
+                // Optional: This text field can be hidden if you prefer only the combined control.
                 SizedBox(
                   width: 100,
                   child: TextField(
@@ -347,14 +380,14 @@ class _DashboardPageState extends State<DashboardPage> {
               ],
             ),
           ),
-          // Interactive radius slider.
-          _buildRadiusSlider(),
+          // Editable radius slider and number.
+          _buildRadiusControl(),
           // Main Content.
           Expanded(
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Left side: 2×2 grid of maps.
+                // Left side: 2x2 grid of maps.
                 Expanded(
                   flex: 2,
                   child: Column(
@@ -696,7 +729,7 @@ class MapViewState extends State<MapView> {
         await loadGeoJson('assets/geojsons/old_taz.geojson');
     final List<dynamic> allFeatures = oldTazData['features'] as List<dynamic>;
 
-    // Find the target feature to use as center.
+    // Find the target feature.
     final targetFeature = allFeatures.firstWhere(
       (f) =>
           (f['properties'] as Map<String, dynamic>)['taz_id']?.toString() ==
@@ -742,7 +775,7 @@ class MapViewState extends State<MapView> {
       'features': withinFeatures,
     };
 
-    // Add the target layer (blue).
+    // Add target layer (blue).
     await _addGeoJsonSourceAndLineLayer(
       sourceId: "old_taz_target_source",
       layerId: "old_taz_target_line",
@@ -750,7 +783,7 @@ class MapViewState extends State<MapView> {
       lineColor: "#0000FF",
       lineWidth: 2.0,
     );
-    // Add the other old TAZ layer (purple).
+    // Add others layer (purple).
     await _addGeoJsonSourceAndLineLayer(
       sourceId: "old_taz_others_source",
       layerId: "old_taz_others_line",
