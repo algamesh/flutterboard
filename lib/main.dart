@@ -46,6 +46,56 @@ Future<Map<String, dynamic>> loadGeoJson(String path) async {
   return jsonDecode(str) as Map<String, dynamic>;
 }
 
+/// Helper to standardize property (column) names across different geojsons.
+/// For each feature, all keys are lowercased and type-specific renaming is applied.
+/// For example:
+/// • In new TAZ, 'taz_new1' is renamed to 'taz_id'.
+/// • In blocks, 'blockce20' is renamed to 'block_id' and 'taz_id0' (or 'taz_new1')
+///   is renamed to 'taz_id'.
+/// • In old TAZ, 'objectid' is renamed to 'object_id'.
+Map<String, dynamic> standardizeGeoJsonProperties(
+    Map<String, dynamic> geojson, String featureType) {
+  if (geojson['features'] is List) {
+    for (var feature in geojson['features']) {
+      Map<String, dynamic> props =
+          feature['properties'] as Map<String, dynamic>;
+      // Convert all keys to lowercase.
+      Map<String, dynamic> newProps = {};
+      props.forEach((key, value) {
+        newProps[key.toLowerCase()] = value;
+      });
+
+      // Apply type-specific standardization.
+      if (featureType == 'new_taz') {
+        if (newProps.containsKey('taz_new1')) {
+          newProps['taz_id'] = newProps['taz_new1'];
+          newProps.remove('taz_new1');
+        }
+      } else if (featureType == 'blocks') {
+        if (newProps.containsKey('blockce20')) {
+          newProps['block_id'] = newProps['blockce20'];
+          newProps.remove('blockce20');
+        }
+        if (newProps.containsKey('taz_id0')) {
+          newProps['taz_id'] = newProps['taz_id0'];
+          newProps.remove('taz_id0');
+        } else if (newProps.containsKey('taz_new1')) {
+          // If no 'taz_id0' is present, try 'taz_new1'
+          newProps['taz_id'] = newProps['taz_new1'];
+          newProps.remove('taz_new1');
+        }
+      } else if (featureType == 'old_taz') {
+        if (newProps.containsKey('objectid')) {
+          newProps['object_id'] = newProps['objectid'];
+          newProps.remove('objectid');
+        }
+      }
+      feature['properties'] = newProps;
+    }
+  }
+  return geojson;
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -127,6 +177,17 @@ class _DashboardPageState extends State<DashboardPage> {
     _cachedOldTaz = await loadGeoJson('assets/geojsons/old_taz.geojson');
     _cachedNewTaz = await loadGeoJson('assets/geojsons/new_taz.geojson');
     _cachedBlocks = await loadGeoJson('assets/geojsons/blocks.geojson');
+
+    // Standardize column names for development:
+    if (_cachedOldTaz != null) {
+      _cachedOldTaz = standardizeGeoJsonProperties(_cachedOldTaz!, "old_taz");
+    }
+    if (_cachedNewTaz != null) {
+      _cachedNewTaz = standardizeGeoJsonProperties(_cachedNewTaz!, "new_taz");
+    }
+    if (_cachedBlocks != null) {
+      _cachedBlocks = standardizeGeoJsonProperties(_cachedBlocks!, "blocks");
+    }
 
     // Build spatial index for blocks.
     if (_cachedBlocks != null && _cachedBlocks!['features'] != null) {
@@ -210,49 +271,49 @@ class _DashboardPageState extends State<DashboardPage> {
       _newTazTableData = [
         {
           "id": tazId,
-          "HH19": 123,
-          "PERSNS19": 456,
-          "WORKRS19": 78,
-          "EMP19": 999,
-          "HH49": 140,
-          "PERSNS49": 490,
-          "WORKRS49": 90,
-          "EMP49": 1200
+          "hh19": 123,
+          "persns19": 456,
+          "workrs19": 78,
+          "emp19": 999,
+          "hh49": 140,
+          "persns49": 490,
+          "workrs49": 90,
+          "emp49": 1200
         },
         {
           "id": 999,
-          "HH19": 321,
-          "PERSNS19": 654,
-          "WORKRS19": 87,
-          "EMP19": 555,
-          "HH49": 130,
-          "PERSNS49": 410,
-          "WORKRS49": 100,
-          "EMP49": 1100
+          "hh19": 321,
+          "persns19": 654,
+          "workrs19": 87,
+          "emp19": 555,
+          "hh49": 130,
+          "persns49": 410,
+          "workrs49": 100,
+          "emp49": 1100
         },
       ];
       _blocksTableData = [
         {
           "id": "BlockA",
-          "HH19": 50,
-          "PERSNS19": 120,
-          "WORKRS19": 30,
-          "EMP19": 220,
-          "HH49": 80,
-          "PERSNS49": 200,
-          "WORKRS49": 35,
-          "EMP49": 300
+          "hh19": 50,
+          "persns19": 120,
+          "workrs19": 30,
+          "emp19": 220,
+          "hh49": 80,
+          "persns49": 200,
+          "workrs49": 35,
+          "emp49": 300
         },
         {
           "id": "BlockB",
-          "HH19": 70,
-          "PERSNS19": 180,
-          "WORKRS19": 40,
-          "EMP19": 300,
-          "HH49": 90,
-          "PERSNS49": 240,
-          "WORKRS49": 42,
-          "EMP49": 360
+          "hh19": 70,
+          "persns19": 180,
+          "workrs19": 40,
+          "emp19": 300,
+          "hh49": 90,
+          "persns49": 240,
+          "workrs49": 42,
+          "emp49": 360
         },
       ];
     });
@@ -492,14 +553,14 @@ class _DashboardPageState extends State<DashboardPage> {
                                   ? _newTazTableData.map((row) {
                                       return DataRow(cells: [
                                         DataCell(Text("${row['id']}")),
-                                        DataCell(Text("${row['HH19']}")),
-                                        DataCell(Text("${row['PERSNS19']}")),
-                                        DataCell(Text("${row['WORKRS19']}")),
-                                        DataCell(Text("${row['EMP19']}")),
-                                        DataCell(Text("${row['HH49']}")),
-                                        DataCell(Text("${row['PERSNS49']}")),
-                                        DataCell(Text("${row['WORKRS49']}")),
-                                        DataCell(Text("${row['EMP49']}")),
+                                        DataCell(Text("${row['hh19']}")),
+                                        DataCell(Text("${row['persns19']}")),
+                                        DataCell(Text("${row['workrs19']}")),
+                                        DataCell(Text("${row['emp19']}")),
+                                        DataCell(Text("${row['hh49']}")),
+                                        DataCell(Text("${row['persns49']}")),
+                                        DataCell(Text("${row['workrs49']}")),
+                                        DataCell(Text("${row['emp49']}")),
                                       ]);
                                     }).toList()
                                   : [
@@ -546,14 +607,14 @@ class _DashboardPageState extends State<DashboardPage> {
                                   ? _blocksTableData.map((row) {
                                       return DataRow(cells: [
                                         DataCell(Text("${row['id']}")),
-                                        DataCell(Text("${row['HH19']}")),
-                                        DataCell(Text("${row['PERSNS19']}")),
-                                        DataCell(Text("${row['WORKRS19']}")),
-                                        DataCell(Text("${row['EMP19']}")),
-                                        DataCell(Text("${row['HH49']}")),
-                                        DataCell(Text("${row['PERSNS49']}")),
-                                        DataCell(Text("${row['WORKRS49']}")),
-                                        DataCell(Text("${row['EMP49']}")),
+                                        DataCell(Text("${row['hh19']}")),
+                                        DataCell(Text("${row['persns19']}")),
+                                        DataCell(Text("${row['workrs19']}")),
+                                        DataCell(Text("${row['emp19']}")),
+                                        DataCell(Text("${row['hh49']}")),
+                                        DataCell(Text("${row['persns49']}")),
+                                        DataCell(Text("${row['workrs49']}")),
+                                        DataCell(Text("${row['emp49']}")),
                                       ]);
                                     }).toList()
                                   : [
