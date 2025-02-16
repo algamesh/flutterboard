@@ -355,11 +355,20 @@ class _DashboardPageState extends State<DashboardPage> {
                                     _blocksIndex, // Pass the spatial index.
                               ),
                             ),
+                            // Notice the added ValueKey for the combined view.
                             Expanded(
                               child: MapView(
+                                key: ValueKey(
+                                    "combined_${_selectedTazId ?? 'none'}"),
                                 title: "Combined",
                                 mode: MapViewMode.combined,
-                                drawShapes: false,
+                                drawShapes: _hasSearched,
+                                selectedTazId: _selectedTazId,
+                                radius: _radius,
+                                cachedOldTaz: _cachedOldTaz,
+                                cachedNewTaz: _cachedNewTaz,
+                                cachedBlocks: _cachedBlocks,
+                                blocksIndex: _blocksIndex,
                               ),
                             ),
                           ],
@@ -540,7 +549,10 @@ class MapViewState extends State<MapView> {
   @override
   void didUpdateWidget(covariant MapView oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.drawShapes && !_hasLoadedLayers && controller != null) {
+    // If the selected TAZ or the draw flag changes, reset the layers.
+    if (oldWidget.selectedTazId != widget.selectedTazId ||
+        oldWidget.drawShapes != widget.drawShapes) {
+      _hasLoadedLayers = false;
       _loadLayers();
     }
   }
@@ -593,6 +605,29 @@ class MapViewState extends State<MapView> {
         await _loadNewTazLine();
       } else if (widget.mode == MapViewMode.blocks) {
         await _loadBlocksFill();
+      } else if (widget.mode == MapViewMode.combined) {
+        // In combined view, add all layers: blocks (bottom), old TAZ (middle), then new TAZ (top).
+        final blocksData = await _loadBlocksFill(zoom: false);
+        final oldData = await _loadOldTazLine(zoom: false);
+        final newData = await _loadNewTazLine(zoom: false);
+        // Combine features from all layers for a unified zoom.
+        List<dynamic> allFeatures = [];
+        if (blocksData != null && blocksData['features'] != null) {
+          allFeatures.addAll(blocksData['features']);
+        }
+        if (oldData != null && oldData['features'] != null) {
+          allFeatures.addAll(oldData['features']);
+        }
+        if (newData != null && newData['features'] != null) {
+          allFeatures.addAll(newData['features']);
+        }
+        if (allFeatures.isNotEmpty) {
+          final unionData = {
+            'type': 'FeatureCollection',
+            'features': allFeatures
+          };
+          await _zoomToFeatureBounds(unionData);
+        }
       }
       _hasLoadedLayers = true;
     } catch (e) {
@@ -600,8 +635,8 @@ class MapViewState extends State<MapView> {
     }
   }
 
-  Future<void> _loadOldTazLine() async {
-    if (controller == null) return;
+  Future<Map<String, dynamic>?> _loadOldTazLine({bool zoom = true}) async {
+    if (controller == null) return null;
     final oldTazData = widget.cachedOldTaz ??
         await loadGeoJson('assets/geojsons/old_taz.geojson');
     if (widget.selectedTazId != null) {
@@ -615,7 +650,7 @@ class MapViewState extends State<MapView> {
           "Old TAZ: All features: ${allFeatures.length}, Filtered: ${filteredFeatures.length}");
       if (filteredFeatures.isEmpty) {
         debugPrint("No old TAZ found matching ID ${widget.selectedTazId}.");
-        return;
+        return null;
       }
       final filteredData = {
         'type': 'FeatureCollection',
@@ -628,14 +663,16 @@ class MapViewState extends State<MapView> {
         lineColor: "#0000FF",
         lineWidth: 2.0,
       );
-      await _zoomToFeatureBounds(filteredData);
+      if (zoom) await _zoomToFeatureBounds(filteredData);
+      return filteredData;
     }
+    return null;
   }
 
-  Future<void> _loadNewTazLine() async {
+  Future<Map<String, dynamic>?> _loadNewTazLine({bool zoom = true}) async {
     if (controller == null ||
         widget.selectedTazId == null ||
-        widget.radius == null) return;
+        widget.radius == null) return null;
     final oldTazData = widget.cachedOldTaz ??
         await loadGeoJson('assets/geojsons/old_taz.geojson');
     final List<dynamic> oldFeatures = oldTazData['features'] as List<dynamic>;
@@ -647,7 +684,7 @@ class MapViewState extends State<MapView> {
     );
     if (oldFeature == null) {
       debugPrint("No old TAZ found for selected ID ${widget.selectedTazId}");
-      return;
+      return null;
     }
     final turf.Feature oldTazFeature = turf.Feature.fromJson(oldFeature);
     final oldCentroidFeature = turf.centroid(oldTazFeature);
@@ -669,7 +706,7 @@ class MapViewState extends State<MapView> {
         "New TAZ: All features: ${newFeatures.length}, Filtered: ${filteredNewFeatures.length}");
     if (filteredNewFeatures.isEmpty) {
       debugPrint("No new TAZ features within the radius.");
-      return;
+      return null;
     }
     final filteredNewData = {
       'type': 'FeatureCollection',
@@ -682,13 +719,14 @@ class MapViewState extends State<MapView> {
       lineColor: "#FF0000",
       lineWidth: 2.0,
     );
-    await _zoomToFeatureBounds(filteredNewData);
+    if (zoom) await _zoomToFeatureBounds(filteredNewData);
+    return filteredNewData;
   }
 
-  Future<void> _loadBlocksFill() async {
+  Future<Map<String, dynamic>?> _loadBlocksFill({bool zoom = true}) async {
     if (controller == null ||
         widget.selectedTazId == null ||
-        widget.radius == null) return;
+        widget.radius == null) return null;
     final oldTazData = widget.cachedOldTaz ??
         await loadGeoJson('assets/geojsons/old_taz.geojson');
     final List<dynamic> oldFeatures = oldTazData['features'] as List<dynamic>;
@@ -700,7 +738,7 @@ class MapViewState extends State<MapView> {
     );
     if (oldFeature == null) {
       debugPrint("No old TAZ found for selected ID ${widget.selectedTazId}");
-      return;
+      return null;
     }
     final turf.Feature oldTazFeature = turf.Feature.fromJson(oldFeature);
     final oldCentroidFeature = turf.centroid(oldTazFeature);
@@ -713,14 +751,12 @@ class MapViewState extends State<MapView> {
     final double deltaLat = radiusKm / 110.574; // degrees per km latitude.
     final double deltaLng =
         radiusKm / (111.320 * math.cos(centerLat * math.pi / 180));
-    // Create a rectangle for our search area.
     final math.Rectangle<double> circleBBox = math.Rectangle(
         centerLng - deltaLng, centerLat - deltaLat, 2 * deltaLng, 2 * deltaLat);
 
     // Use the spatial index to quickly retrieve candidate blocks.
     List<dynamic> candidateBlocks = [];
     if (widget.blocksIndex != null) {
-      // Create a math.Rectangle<num> for the search.
       math.Rectangle<num> searchRect = math.Rectangle<num>(
           circleBBox.left, circleBBox.top, circleBBox.width, circleBBox.height);
       candidateBlocks = widget.blocksIndex!
@@ -728,12 +764,10 @@ class MapViewState extends State<MapView> {
           .map((datum) => datum.value)
           .toList();
     } else {
-      // Fallback if spatial index is not available.
       candidateBlocks =
           (widget.cachedBlocks?['features'] as List<dynamic>) ?? [];
     }
 
-    // Now, perform an exact check on the candidate blocks.
     final filteredBlocks = candidateBlocks.where((block) {
       final turf.Feature blockFeature = turf.Feature.fromJson(block);
       final blockCentroidFeature = turf.centroid(blockFeature);
@@ -741,7 +775,6 @@ class MapViewState extends State<MapView> {
           blockCentroidFeature.geometry as turf.Point;
       final double blockLng = (blockCentroid.coordinates[0]!).toDouble();
       final double blockLat = (blockCentroid.coordinates[1]!).toDouble();
-      // Quick bbox check.
       if (blockLng < circleBBox.left ||
           blockLng > circleBBox.left + circleBBox.width ||
           blockLat < circleBBox.top ||
@@ -758,7 +791,7 @@ class MapViewState extends State<MapView> {
         "Blocks: Candidate features: ${candidateBlocks.length}, Filtered: ${filteredBlocks.length}");
     if (filteredBlocks.isEmpty) {
       debugPrint("No blocks within the radius.");
-      return;
+      return null;
     }
     final filteredBlocksData = {
       'type': 'FeatureCollection',
@@ -776,7 +809,8 @@ class MapViewState extends State<MapView> {
         fillOpacity: 0.4,
       ),
     );
-    await _zoomToFeatureBounds(filteredBlocksData);
+    if (zoom) await _zoomToFeatureBounds(filteredBlocksData);
+    return filteredBlocksData;
   }
 
   Future<void> _addGeoJsonSourceAndLineLayer({
