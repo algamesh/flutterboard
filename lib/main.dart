@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:html' as html; // For web injection.
-import 'dart:math' as math; // For cosine calculations & math.Rectangle.
+import 'dart:math' as math; // For math calculations.
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
@@ -9,6 +9,36 @@ import 'package:maplibre_gl/maplibre_gl.dart';
 
 import 'package:turf/turf.dart' as turf;
 import 'package:r_tree/r_tree.dart';
+
+Map<String, dynamic> createCirclePolygon(turf.Point center, double radius,
+    {int steps = 64}) {
+  final List<List<double>> coordinates = [];
+  // Earth's radius in kilometers.
+  const double earthRadius = 6371.0;
+  double centerLng = (center.coordinates[0]! as num).toDouble();
+  double centerLat = (center.coordinates[1]! as num).toDouble();
+  for (int i = 0; i <= steps; i++) {
+    double angle = 2 * math.pi * i / steps;
+    // Calculate offsets in radians.
+    double deltaLat = radius / earthRadius;
+    double deltaLng =
+        radius / (earthRadius * math.cos(centerLat * math.pi / 180));
+    // Convert offsets from radians to degrees.
+    double pointLat =
+        centerLat + (deltaLat * math.sin(angle)) * (180 / math.pi);
+    double pointLng =
+        centerLng + (deltaLng * math.cos(angle)) * (180 / math.pi);
+    coordinates.add([pointLng, pointLat]);
+  }
+  return {
+    'type': 'Feature',
+    'geometry': {
+      'type': 'Polygon',
+      'coordinates': [coordinates],
+    },
+    'properties': {},
+  };
+}
 
 /// Shared function to load GeoJSON data.
 Future<Map<String, dynamic>> loadGeoJson(String path) async {
@@ -70,6 +100,7 @@ class DashboardPage extends StatefulWidget {
 class _DashboardPageState extends State<DashboardPage> {
   // Controllers for user input.
   final TextEditingController _searchController = TextEditingController();
+  // (Optional) You can remove the radius text field if you prefer the slider.
   final TextEditingController _radiusController =
       TextEditingController(text: "1000");
   String _searchLabel = "Currently Searching TAZ: (none)";
@@ -90,7 +121,6 @@ class _DashboardPageState extends State<DashboardPage> {
   @override
   void initState() {
     super.initState();
-    // Load and cache data at startup, then build spatial index.
     _loadCachedData();
   }
 
@@ -103,22 +133,16 @@ class _DashboardPageState extends State<DashboardPage> {
     if (_cachedBlocks != null && _cachedBlocks!['features'] != null) {
       List<RTreeDatum<dynamic>> items = [];
       for (var feature in _cachedBlocks!['features']) {
-        // Compute bounding box.
         math.Rectangle<double> bbox = _boundingBoxFromFeature(feature);
-        // Create a datum from the bbox and feature.
         items.add(RTreeDatum(bbox, feature));
       }
-      // Create an RTree instance with a branch factor of 16 (default).
       _blocksIndex = RTree(16);
-      // Bulk add all items.
       _blocksIndex!.add(items);
     }
-    setState(() {
-      // Data and spatial index are now cached.
-    });
+    setState(() {});
   }
 
-  // Compute bounding box for a GeoJSON feature (assumes Polygon or MultiPolygon).
+  // Compute bounding box for a GeoJSON feature.
   math.Rectangle<double> _boundingBoxFromFeature(dynamic feature) {
     double? minLng, minLat, maxLng, maxLat;
     final geometry = feature['geometry'];
@@ -149,7 +173,6 @@ class _DashboardPageState extends State<DashboardPage> {
         }
       }
     }
-    // Provide defaults if needed.
     minLng ??= 0;
     minLat ??= 0;
     maxLng ??= 0;
@@ -184,7 +207,7 @@ class _DashboardPageState extends State<DashboardPage> {
       _searchLabel = "Currently Searching TAZ: $tazId";
       _hasSearched = true;
       _selectedTazId = tazId;
-      // Dummy table updates...
+      // Dummy table updates.
       _newTazTableData = [
         {
           "id": tazId,
@@ -236,6 +259,35 @@ class _DashboardPageState extends State<DashboardPage> {
     });
   }
 
+  /// A slider widget to change the radius interactively.
+  Widget _buildRadiusSlider() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8.0),
+      child: Row(
+        children: [
+          const Text("Radius (m):"),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Slider(
+              min: 500,
+              max: 5000,
+              divisions: 45,
+              label: "${_radius.round()}",
+              value: _radius,
+              onChanged: (value) {
+                setState(() {
+                  _radius = value;
+                  // As _radius updates, maps will refresh.
+                });
+              },
+            ),
+          ),
+          Text("${_radius.round()} m"),
+        ],
+      ),
+    );
+  }
+
   Future<void> _matchZoom() async {
     // Optional: implement syncing zoom.
   }
@@ -265,6 +317,7 @@ class _DashboardPageState extends State<DashboardPage> {
                   ),
                 ),
                 const SizedBox(width: 8),
+                // (Optional) Radius text field.
                 SizedBox(
                   width: 100,
                   child: TextField(
@@ -294,6 +347,8 @@ class _DashboardPageState extends State<DashboardPage> {
               ],
             ),
           ),
+          // Interactive radius slider.
+          _buildRadiusSlider(),
           // Main Content.
           Expanded(
             child: Row(
@@ -310,8 +365,9 @@ class _DashboardPageState extends State<DashboardPage> {
                           children: [
                             Expanded(
                               child: MapView(
-                                key: ValueKey<int?>(_selectedTazId),
-                                title: "Old TAZ (Blue Outline)",
+                                key: ValueKey(
+                                    "old_${_selectedTazId ?? 'none'}_${_radius.round()}"),
+                                title: "Old TAZ (Target=Blue, Others=Purple)",
                                 mode: MapViewMode.oldTaz,
                                 drawShapes: _hasSearched,
                                 selectedTazId: _selectedTazId,
@@ -321,8 +377,8 @@ class _DashboardPageState extends State<DashboardPage> {
                             ),
                             Expanded(
                               child: MapView(
-                                key:
-                                    ValueKey("new_${_selectedTazId ?? 'none'}"),
+                                key: ValueKey(
+                                    "new_${_selectedTazId ?? 'none'}_${_radius.round()}"),
                                 title: "New TAZ (Red Outline)",
                                 mode: MapViewMode.newTaz,
                                 drawShapes: _hasSearched,
@@ -342,7 +398,7 @@ class _DashboardPageState extends State<DashboardPage> {
                             Expanded(
                               child: MapView(
                                 key: ValueKey(
-                                    "blocks_${_selectedTazId ?? 'none'}"),
+                                    "blocks_${_selectedTazId ?? 'none'}_${_radius.round()}"),
                                 title: "Blocks",
                                 mode: MapViewMode.blocks,
                                 drawShapes: _hasSearched,
@@ -351,15 +407,13 @@ class _DashboardPageState extends State<DashboardPage> {
                                 cachedOldTaz: _cachedOldTaz,
                                 cachedNewTaz: _cachedNewTaz,
                                 cachedBlocks: _cachedBlocks,
-                                blocksIndex:
-                                    _blocksIndex, // Pass the spatial index.
+                                blocksIndex: _blocksIndex,
                               ),
                             ),
-                            // Notice the added ValueKey for the combined view.
                             Expanded(
                               child: MapView(
                                 key: ValueKey(
-                                    "combined_${_selectedTazId ?? 'none'}"),
+                                    "combined_${_selectedTazId ?? 'none'}_${_radius.round()}"),
                                 title: "Combined",
                                 mode: MapViewMode.combined,
                                 drawShapes: _hasSearched,
@@ -503,12 +557,7 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 }
 
-enum MapViewMode {
-  oldTaz,
-  newTaz,
-  blocks,
-  combined,
-}
+enum MapViewMode { oldTaz, newTaz, blocks, combined }
 
 class MapView extends StatefulWidget {
   final String title;
@@ -517,7 +566,7 @@ class MapView extends StatefulWidget {
   final int? selectedTazId;
   final double? radius; // in meters
 
-  // Cached GeoJSON data. If provided, these are used instead of loading from disk.
+  // Cached GeoJSON data.
   final Map<String, dynamic>? cachedOldTaz;
   final Map<String, dynamic>? cachedNewTaz;
   final Map<String, dynamic>? cachedBlocks;
@@ -549,9 +598,9 @@ class MapViewState extends State<MapView> {
   @override
   void didUpdateWidget(covariant MapView oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // If the selected TAZ or the draw flag changes, reset the layers.
     if (oldWidget.selectedTazId != widget.selectedTazId ||
-        oldWidget.drawShapes != widget.drawShapes) {
+        oldWidget.drawShapes != widget.drawShapes ||
+        oldWidget.radius != widget.radius) {
       _hasLoadedLayers = false;
       _loadLayers();
     }
@@ -600,17 +649,17 @@ class MapViewState extends State<MapView> {
     if (controller == null) return;
     try {
       if (widget.mode == MapViewMode.oldTaz) {
-        await _loadOldTazLine();
+        await _loadOldTazLayers();
+        await _loadRadiusCircle();
       } else if (widget.mode == MapViewMode.newTaz) {
         await _loadNewTazLine();
       } else if (widget.mode == MapViewMode.blocks) {
         await _loadBlocksFill();
       } else if (widget.mode == MapViewMode.combined) {
-        // In combined view, add all layers: blocks (bottom), old TAZ (middle), then new TAZ (top).
         final blocksData = await _loadBlocksFill(zoom: false);
-        final oldData = await _loadOldTazLine(zoom: false);
+        final oldData = await _loadOldTazLayers(zoom: false);
         final newData = await _loadNewTazLine(zoom: false);
-        // Combine features from all layers for a unified zoom.
+        await _loadRadiusCircle();
         List<dynamic> allFeatures = [];
         if (blocksData != null && blocksData['features'] != null) {
           allFeatures.addAll(blocksData['features']);
@@ -635,38 +684,83 @@ class MapViewState extends State<MapView> {
     }
   }
 
-  Future<Map<String, dynamic>?> _loadOldTazLine({bool zoom = true}) async {
-    if (controller == null) return null;
+  /// Loads all old TAZ features within the search radius.
+  /// Splits them into two groups:
+  /// - Target (selectedTazId): blue outline.
+  /// - Others: purple outline.
+  Future<Map<String, dynamic>?> _loadOldTazLayers({bool zoom = true}) async {
+    if (controller == null ||
+        widget.selectedTazId == null ||
+        widget.radius == null) return null;
     final oldTazData = widget.cachedOldTaz ??
         await loadGeoJson('assets/geojsons/old_taz.geojson');
-    if (widget.selectedTazId != null) {
-      final List<dynamic> allFeatures = oldTazData['features'] as List<dynamic>;
-      final filteredFeatures = allFeatures.where((feature) {
-        final props = feature['properties'] as Map<String, dynamic>;
-        final propValue = props['taz_id']?.toString() ?? '';
-        return propValue == widget.selectedTazId.toString();
-      }).toList();
-      debugPrint(
-          "Old TAZ: All features: ${allFeatures.length}, Filtered: ${filteredFeatures.length}");
-      if (filteredFeatures.isEmpty) {
-        debugPrint("No old TAZ found matching ID ${widget.selectedTazId}.");
-        return null;
-      }
-      final filteredData = {
-        'type': 'FeatureCollection',
-        'features': filteredFeatures,
-      };
-      await _addGeoJsonSourceAndLineLayer(
-        sourceId: "old_taz_source",
-        layerId: "old_taz_line",
-        geojsonData: filteredData,
-        lineColor: "#0000FF",
-        lineWidth: 2.0,
-      );
-      if (zoom) await _zoomToFeatureBounds(filteredData);
-      return filteredData;
+    final List<dynamic> allFeatures = oldTazData['features'] as List<dynamic>;
+
+    // Find the target feature to use as center.
+    final targetFeature = allFeatures.firstWhere(
+      (f) =>
+          (f['properties'] as Map<String, dynamic>)['taz_id']?.toString() ==
+          widget.selectedTazId.toString(),
+      orElse: () => null,
+    );
+    if (targetFeature == null) {
+      debugPrint("No old TAZ found for selected ID ${widget.selectedTazId}");
+      return null;
     }
-    return null;
+    final turf.Feature targetTazFeature = turf.Feature.fromJson(targetFeature);
+    final targetCentroidFeature = turf.centroid(targetTazFeature);
+    final turf.Point targetCentroid =
+        targetCentroidFeature.geometry as turf.Point;
+    double radiusKm = widget.radius! / 1000;
+
+    // Filter all features by distance from the target centroid.
+    List<dynamic> withinFeatures = [];
+    for (var feature in allFeatures) {
+      final turf.Feature f = turf.Feature.fromJson(feature);
+      final centroidFeature = turf.centroid(f);
+      final turf.Point centroid = centroidFeature.geometry as turf.Point;
+      double distance =
+          (turf.distance(targetCentroid, centroid, turf.Unit.kilometers) as num)
+              .toDouble();
+      if (distance <= radiusKm) {
+        withinFeatures.add(feature);
+      }
+    }
+
+    // Split features: target (blue) and others (purple).
+    List<dynamic> targetFeatures = withinFeatures.where((f) {
+      final props = f['properties'] as Map<String, dynamic>;
+      return props['taz_id']?.toString() == widget.selectedTazId.toString();
+    }).toList();
+    List<dynamic> otherFeatures = withinFeatures.where((f) {
+      final props = f['properties'] as Map<String, dynamic>;
+      return props['taz_id']?.toString() != widget.selectedTazId.toString();
+    }).toList();
+
+    final combinedData = {
+      'type': 'FeatureCollection',
+      'features': withinFeatures,
+    };
+
+    // Add the target layer (blue).
+    await _addGeoJsonSourceAndLineLayer(
+      sourceId: "old_taz_target_source",
+      layerId: "old_taz_target_line",
+      geojsonData: {'type': 'FeatureCollection', 'features': targetFeatures},
+      lineColor: "#0000FF",
+      lineWidth: 2.0,
+    );
+    // Add the other old TAZ layer (purple).
+    await _addGeoJsonSourceAndLineLayer(
+      sourceId: "old_taz_others_source",
+      layerId: "old_taz_others_line",
+      geojsonData: {'type': 'FeatureCollection', 'features': otherFeatures},
+      lineColor: "#800080",
+      lineWidth: 2.0,
+    );
+
+    if (zoom) await _zoomToFeatureBounds(combinedData);
+    return combinedData;
   }
 
   Future<Map<String, dynamic>?> _loadNewTazLine({bool zoom = true}) async {
@@ -702,15 +796,13 @@ class MapViewState extends State<MapView> {
               .toDouble();
       return distance <= radiusKm;
     }).toList();
-    debugPrint(
-        "New TAZ: All features: ${newFeatures.length}, Filtered: ${filteredNewFeatures.length}");
     if (filteredNewFeatures.isEmpty) {
       debugPrint("No new TAZ features within the radius.");
       return null;
     }
     final filteredNewData = {
       'type': 'FeatureCollection',
-      'features': filteredNewFeatures,
+      'features': filteredNewFeatures
     };
     await _addGeoJsonSourceAndLineLayer(
       sourceId: "new_taz_source",
@@ -745,16 +837,14 @@ class MapViewState extends State<MapView> {
     final turf.Point oldCentroid = oldCentroidFeature.geometry as turf.Point;
     double radiusKm = widget.radius! / 1000;
 
-    // Compute bounding box for the search circle.
     final double centerLat = (oldCentroid.coordinates[1]!).toDouble();
     final double centerLng = (oldCentroid.coordinates[0]!).toDouble();
-    final double deltaLat = radiusKm / 110.574; // degrees per km latitude.
+    final double deltaLat = radiusKm / 110.574;
     final double deltaLng =
         radiusKm / (111.320 * math.cos(centerLat * math.pi / 180));
     final math.Rectangle<double> circleBBox = math.Rectangle(
         centerLng - deltaLng, centerLat - deltaLat, 2 * deltaLng, 2 * deltaLat);
 
-    // Use the spatial index to quickly retrieve candidate blocks.
     List<dynamic> candidateBlocks = [];
     if (widget.blocksIndex != null) {
       math.Rectangle<num> searchRect = math.Rectangle<num>(
@@ -787,30 +877,51 @@ class MapViewState extends State<MapView> {
       return distance <= radiusKm;
     }).toList();
 
-    debugPrint(
-        "Blocks: Candidate features: ${candidateBlocks.length}, Filtered: ${filteredBlocks.length}");
     if (filteredBlocks.isEmpty) {
       debugPrint("No blocks within the radius.");
       return null;
     }
     final filteredBlocksData = {
       'type': 'FeatureCollection',
-      'features': filteredBlocks,
+      'features': filteredBlocks
     };
     await controller!.addSource(
-      "blocks_source",
-      GeojsonSourceProperties(data: filteredBlocksData),
-    );
-    await controller!.addFillLayer(
-      "blocks_source",
-      "blocks_fill",
-      FillLayerProperties(
-        fillColor: "#FFFF00", // Yellow fill.
-        fillOpacity: 0.4,
-      ),
-    );
+        "blocks_source", GeojsonSourceProperties(data: filteredBlocksData));
+    await controller!.addFillLayer("blocks_source", "blocks_fill",
+        FillLayerProperties(fillColor: "#FFFF00", fillOpacity: 0.4));
     if (zoom) await _zoomToFeatureBounds(filteredBlocksData);
     return filteredBlocksData;
+  }
+
+  /// Draws a circle representing the search radius.
+  Future<void> _loadRadiusCircle() async {
+    if (controller == null ||
+        widget.selectedTazId == null ||
+        widget.radius == null ||
+        widget.cachedOldTaz == null) return;
+    final List<dynamic> oldFeatures =
+        widget.cachedOldTaz!['features'] as List<dynamic>;
+    final targetFeature = oldFeatures.firstWhere(
+      (f) =>
+          (f['properties'] as Map<String, dynamic>)['taz_id']?.toString() ==
+          widget.selectedTazId.toString(),
+      orElse: () => null,
+    );
+    if (targetFeature == null) return;
+    final turf.Feature targetTazFeature = turf.Feature.fromJson(targetFeature);
+    final targetCentroidFeature = turf.centroid(targetTazFeature);
+    final turf.Point targetCentroid =
+        targetCentroidFeature.geometry as turf.Point;
+    double radiusKm = widget.radius! / 1000;
+    // Generate circle polygon using the helper.
+    final circleFeature =
+        createCirclePolygon(targetCentroid, radiusKm, steps: 64);
+    await controller!.addSource(
+        "radius_circle_source", GeojsonSourceProperties(data: circleFeature));
+    await controller!.addFillLayer("radius_circle_source", "radius_circle_fill",
+        FillLayerProperties(fillColor: "#0000FF", fillOpacity: 0.1));
+    await controller!.addLineLayer("radius_circle_source", "radius_circle_line",
+        LineLayerProperties(lineColor: "#0000FF", lineWidth: 2.0));
   }
 
   Future<void> _addGeoJsonSourceAndLineLayer({
@@ -822,11 +933,8 @@ class MapViewState extends State<MapView> {
   }) async {
     await controller!
         .addSource(sourceId, GeojsonSourceProperties(data: geojsonData));
-    await controller!.addLineLayer(
-      sourceId,
-      layerId,
-      LineLayerProperties(lineColor: lineColor, lineWidth: lineWidth),
-    );
+    await controller!.addLineLayer(sourceId, layerId,
+        LineLayerProperties(lineColor: lineColor, lineWidth: lineWidth));
   }
 
   Future<void> _zoomToFeatureBounds(
@@ -868,11 +976,9 @@ class MapViewState extends State<MapView> {
       final sw = LatLng(minLat, minLng);
       final ne = LatLng(maxLat, maxLng);
       final bounds = LatLngBounds(southwest: sw, northeast: ne);
-      // Instead of animating, move the camera immediately.
-      controller!.moveCamera(
-        CameraUpdate.newLatLngBounds(bounds,
-            left: 50, right: 50, top: 50, bottom: 50),
-      );
+      // Use moveCamera (instant) to preserve the zoom level.
+      controller!.moveCamera(CameraUpdate.newLatLngBounds(bounds,
+          left: 50, right: 50, top: 50, bottom: 50));
     }
   }
 }
