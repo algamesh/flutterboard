@@ -161,6 +161,9 @@ class _DashboardPageState extends State<DashboardPage> {
   // Spatial index for blocks.
   RTree<dynamic>? _blocksIndex;
 
+  // Keep track of selected new TAZ IDs for highlighting.
+  final Set<int> _selectedNewTazIds = {};
+
   @override
   void initState() {
     super.initState();
@@ -264,14 +267,21 @@ class _DashboardPageState extends State<DashboardPage> {
       // Optionally clear table data on new search:
       _newTazTableData = [];
       _blocksTableData = [];
+      _selectedNewTazIds.clear();
     });
   }
 
-  /// Adds a new row for the New TAZ table if the tapped TAZ isn't already in the list.
-  /// This version looks up the corresponding feature in _cachedNewTaz and brings in
-  /// values such as hh19, persns19, etc.
-  void _addNewTazRow(int tappedId) {
-    if (!_newTazTableData.any((row) => row['id'] == tappedId)) {
+  /// Toggles a new row for the New TAZ table.
+  /// If the tapped TAZ is already in the table, remove it and remove the highlight;
+  /// otherwise, add it.
+  void _toggleNewTazRow(int tappedId) {
+    bool exists = _newTazTableData.any((row) => row['id'] == tappedId);
+    if (exists) {
+      setState(() {
+        _newTazTableData.removeWhere((row) => row['id'] == tappedId);
+        _selectedNewTazIds.remove(tappedId);
+      });
+    } else {
       Map<String, dynamic> newRow = {
         'id': tappedId,
         'hh19': 0,
@@ -309,12 +319,12 @@ class _DashboardPageState extends State<DashboardPage> {
 
       setState(() {
         _newTazTableData.add(newRow);
+        _selectedNewTazIds.add(tappedId);
       });
     }
   }
 
   /// Adds a new row for the Blocks table when a block is tapped.
-  /// It looks up the matching feature in _cachedBlocks and extracts values.
   void _addBlockRow(int tappedId) {
     if (!_blocksTableData.any((row) => row['id'] == tappedId)) {
       Map<String, dynamic> newRow = {
@@ -400,7 +410,7 @@ class _DashboardPageState extends State<DashboardPage> {
                 }
                 setState(() {
                   _radius = newVal!;
-                  _radiusController.text = newVal!.round().toString();
+                  _radiusController.text = newVal.round().toString();
                 });
               },
             ),
@@ -512,16 +522,18 @@ class _DashboardPageState extends State<DashboardPage> {
                               child: MapView(
                                 key: ValueKey(
                                     "new_${_selectedTazId ?? 'none'}_${_radius.round()}"),
-                                title: "New TAZ (Red Outline)\n(Tap to select)",
+                                title:
+                                    "New TAZ (Red Outline)\n(Tap to toggle selection)",
                                 mode: MapViewMode.newTaz,
                                 drawShapes: _hasSearched,
                                 selectedTazId: _selectedTazId,
                                 radius: _radius,
                                 cachedOldTaz: _cachedOldTaz,
                                 cachedNewTaz: _cachedNewTaz,
+                                // Pass the selected new TAZ IDs for highlighting.
+                                selectedIds: _selectedNewTazIds,
                                 onTazSelected: (int tappedId) {
-                                  // Only update the New TAZ table.
-                                  _addNewTazRow(tappedId);
+                                  _toggleNewTazRow(tappedId);
                                 },
                               ),
                             ),
@@ -546,7 +558,6 @@ class _DashboardPageState extends State<DashboardPage> {
                                 cachedBlocks: _cachedBlocks,
                                 blocksIndex: _blocksIndex,
                                 onTazSelected: (int tappedId) {
-                                  // Update the Blocks table when a block is tapped.
                                   _addBlockRow(tappedId);
                                 },
                               ),
@@ -718,6 +729,9 @@ class MapView extends StatefulWidget {
   /// Callback for when a geometry is tapped.
   final ValueChanged<int>? onTazSelected;
 
+  /// New optional parameter for selected IDs (for new TAZ mode)
+  final Set<int>? selectedIds;
+
   const MapView({
     Key? key,
     required this.title,
@@ -730,6 +744,7 @@ class MapView extends StatefulWidget {
     this.cachedBlocks,
     this.blocksIndex,
     this.onTazSelected,
+    this.selectedIds,
   }) : super(key: key);
 
   @override
@@ -743,6 +758,14 @@ class MapViewState extends State<MapView> {
   @override
   void didUpdateWidget(covariant MapView oldWidget) {
     super.didUpdateWidget(oldWidget);
+    // If the selection has changed in new TAZ mode, update the filter.
+    if (widget.mode == MapViewMode.newTaz && controller != null) {
+      final newFilter =
+          (widget.selectedIds != null && widget.selectedIds!.isNotEmpty)
+              ? ["in", "taz_id", ...widget.selectedIds!.toList()]
+              : ["==", "taz_id", ""];
+      controller!.setFilter("selected_new_taz_fill", newFilter);
+    }
     if (oldWidget.selectedTazId != widget.selectedTazId ||
         oldWidget.drawShapes != widget.drawShapes ||
         oldWidget.radius != widget.radius) {
@@ -809,6 +832,18 @@ class MapViewState extends State<MapView> {
         await _loadRadiusCircle();
       } else if (widget.mode == MapViewMode.newTaz) {
         await _loadNewTazLayers();
+        // Add an overlay layer for highlighting selected new TAZ features.
+        await controller!.addFillLayer(
+          "new_taz_source",
+          "selected_new_taz_fill",
+          FillLayerProperties(
+            fillColor: "#FFFF00", // Yellow highlight.
+            fillOpacity: 0.5,
+          ),
+          filter: (widget.selectedIds != null && widget.selectedIds!.isNotEmpty)
+              ? ["in", "taz_id", ...widget.selectedIds!.toList()]
+              : ["==", "taz_id", ""],
+        );
       } else if (widget.mode == MapViewMode.blocks) {
         await _loadBlocksFill();
       } else if (widget.mode == MapViewMode.combined) {
@@ -1169,7 +1204,6 @@ class MapViewState extends State<MapView> {
   }
 
   /// Handles a tap on the map.
-  /// Converts the tap point (a math Point<double>) to query the rendered features.
   Future<void> _handleMapClick(Point<double> tapPoint) async {
     if (controller == null) return;
     // Determine which layers to query based on mode.
@@ -1181,7 +1215,7 @@ class MapViewState extends State<MapView> {
     } else if (widget.mode == MapViewMode.blocks) {
       layersToQuery = ["blocks_fill"];
     } else {
-      return; // For other modes, we don't process tap events.
+      return;
     }
 
     final features = await controller!.queryRenderedFeatures(
