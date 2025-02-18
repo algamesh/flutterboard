@@ -438,8 +438,6 @@ class _DashboardPageState extends State<DashboardPage> {
                                     _searchLabel =
                                         "Currently Searching TAZ: $tappedId";
                                   });
-                                  // No search even when old taz is selected
-                                  // _runSearch();
                                 },
                               ),
                             ),
@@ -455,14 +453,8 @@ class _DashboardPageState extends State<DashboardPage> {
                                 cachedOldTaz: _cachedOldTaz,
                                 cachedNewTaz: _cachedNewTaz,
                                 onTazSelected: (int tappedId) {
-                                  setState(() {
-                                    _selectedTazId = tappedId;
-                                    _searchController.text =
-                                        tappedId.toString();
-                                    _searchLabel =
-                                        "Currently Searching TAZ: $tappedId";
-                                  });
-                                  // Add the tapped TAZ to the New TAZ table.
+                                  // Only update the table.
+                                  // Do NOT update _selectedTazId so the map key remains the same.
                                   _addNewTazRow(tappedId);
                                 },
                               ),
