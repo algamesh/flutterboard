@@ -268,10 +268,11 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   /// Adds a new row for the New TAZ table if the tapped TAZ isn't already in the list.
+  /// This version looks up the corresponding feature in _cachedNewTaz and brings in
+  /// values such as hh19, persns19, etc.
   void _addNewTazRow(int tappedId) {
     if (!_newTazTableData.any((row) => row['id'] == tappedId)) {
-      // You can replace the following placeholder data with real values.
-      final newRow = {
+      Map<String, dynamic> newRow = {
         'id': tappedId,
         'hh19': 0,
         'persns19': 0,
@@ -282,6 +283,29 @@ class _DashboardPageState extends State<DashboardPage> {
         'workrs49': 0,
         'emp49': 0,
       };
+
+      // If the new TAZ data is available, try to find the matching feature.
+      if (_cachedNewTaz != null && _cachedNewTaz!['features'] != null) {
+        List<dynamic> features = _cachedNewTaz!['features'];
+        var matchingFeature = features.firstWhere(
+          (f) => f['properties']?['taz_id'].toString() == tappedId.toString(),
+          orElse: () => null,
+        );
+        if (matchingFeature != null) {
+          final props = matchingFeature['properties'] as Map<String, dynamic>;
+          newRow = {
+            'id': tappedId,
+            'hh19': props['hh19'] ?? 0,
+            'persns19': props['persns19'] ?? 0,
+            'workrs19': props['workrs19'] ?? 0,
+            'emp19': props['emp19'] ?? 0,
+            'hh49': props['hh49'] ?? 0,
+            'persns49': props['persns49'] ?? 0,
+            'workrs49': props['workrs49'] ?? 0,
+            'emp49': props['emp49'] ?? 0,
+          };
+        }
+      }
 
       setState(() {
         _newTazTableData.add(newRow);
@@ -454,7 +478,7 @@ class _DashboardPageState extends State<DashboardPage> {
                                 cachedNewTaz: _cachedNewTaz,
                                 onTazSelected: (int tappedId) {
                                   // Only update the table.
-                                  // Do NOT update _selectedTazId so the map key remains the same.
+                                  // Do NOT update _selectedTazId so the map key remains unchanged.
                                   _addNewTazRow(tappedId);
                                 },
                               ),
