@@ -313,6 +313,49 @@ class _DashboardPageState extends State<DashboardPage> {
     }
   }
 
+  /// Adds a new row for the Blocks table when a block is tapped.
+  /// It looks up the matching feature in _cachedBlocks and extracts values.
+  void _addBlockRow(int tappedId) {
+    if (!_blocksTableData.any((row) => row['id'] == tappedId)) {
+      Map<String, dynamic> newRow = {
+        'id': tappedId,
+        'hh19': 0,
+        'persns19': 0,
+        'workrs19': 0,
+        'emp19': 0,
+        'hh49': 0,
+        'persns49': 0,
+        'workrs49': 0,
+        'emp49': 0,
+      };
+
+      if (_cachedBlocks != null && _cachedBlocks!['features'] != null) {
+        List<dynamic> features = _cachedBlocks!['features'];
+        var matchingFeature = features.firstWhere(
+          (f) => f['properties']?['block_id'].toString() == tappedId.toString(),
+          orElse: () => null,
+        );
+        if (matchingFeature != null) {
+          final props = matchingFeature['properties'] as Map<String, dynamic>;
+          newRow = {
+            'id': tappedId,
+            'hh19': props['hh19'] ?? 0,
+            'persns19': props['persns19'] ?? 0,
+            'workrs19': props['workrs19'] ?? 0,
+            'emp19': props['emp19'] ?? 0,
+            'hh49': props['hh49'] ?? 0,
+            'persns49': props['persns49'] ?? 0,
+            'workrs49': props['workrs49'] ?? 0,
+            'emp49': props['emp49'] ?? 0,
+          };
+        }
+      }
+      setState(() {
+        _blocksTableData.add(newRow);
+      });
+    }
+  }
+
   /// An editable slider + number field widget for radius.
   Widget _buildRadiusControl() {
     return Padding(
@@ -357,7 +400,7 @@ class _DashboardPageState extends State<DashboardPage> {
                 }
                 setState(() {
                   _radius = newVal!;
-                  _radiusController.text = newVal.round().toString();
+                  _radiusController.text = newVal!.round().toString();
                 });
               },
             ),
@@ -477,8 +520,7 @@ class _DashboardPageState extends State<DashboardPage> {
                                 cachedOldTaz: _cachedOldTaz,
                                 cachedNewTaz: _cachedNewTaz,
                                 onTazSelected: (int tappedId) {
-                                  // Only update the table.
-                                  // Do NOT update _selectedTazId so the map key remains unchanged.
+                                  // Only update the New TAZ table.
                                   _addNewTazRow(tappedId);
                                 },
                               ),
@@ -494,7 +536,7 @@ class _DashboardPageState extends State<DashboardPage> {
                               child: MapView(
                                 key: ValueKey(
                                     "blocks_${_selectedTazId ?? 'none'}_${_radius.round()}"),
-                                title: "Blocks",
+                                title: "Blocks\n(Tap to select)",
                                 mode: MapViewMode.blocks,
                                 drawShapes: _hasSearched,
                                 selectedTazId: _selectedTazId,
@@ -503,6 +545,10 @@ class _DashboardPageState extends State<DashboardPage> {
                                 cachedNewTaz: _cachedNewTaz,
                                 cachedBlocks: _cachedBlocks,
                                 blocksIndex: _blocksIndex,
+                                onTazSelected: (int tappedId) {
+                                  // Update the Blocks table when a block is tapped.
+                                  _addBlockRow(tappedId);
+                                },
                               ),
                             ),
                             Expanded(
@@ -669,7 +715,7 @@ class MapView extends StatefulWidget {
   /// Pass the spatial index for blocks if available.
   final RTree<dynamic>? blocksIndex;
 
-  /// Callback for when a TAZ is tapped.
+  /// Callback for when a geometry is tapped.
   final ValueChanged<int>? onTazSelected;
 
   const MapView({
@@ -714,7 +760,7 @@ class MapViewState extends State<MapView> {
           behavior: HitTestBehavior.translucent,
           onTapDown: (TapDownDetails details) async {
             debugPrint("GestureDetector onTapDown: ${details.globalPosition}");
-            // Convert the tap position to a Point<double> (using dart:math).
+            // Convert the tap position to a Point<double>.
             final tapPoint = Point<double>(
                 details.localPosition.dx, details.localPosition.dy);
             _handleMapClick(tapPoint);
@@ -1123,17 +1169,19 @@ class MapViewState extends State<MapView> {
   }
 
   /// Handles a tap on the map.
-  /// Converts the tap point (a math Point<double>) to query the rendered TAZ features.
+  /// Converts the tap point (a math Point<double>) to query the rendered features.
   Future<void> _handleMapClick(Point<double> tapPoint) async {
     if (controller == null) return;
-    // For TAZ layers, we query specific fill layers.
+    // Determine which layers to query based on mode.
     List<String> layersToQuery = [];
     if (widget.mode == MapViewMode.oldTaz) {
       layersToQuery = ["old_taz_target_fill", "old_taz_others_fill"];
     } else if (widget.mode == MapViewMode.newTaz) {
       layersToQuery = ["new_taz_fill"];
+    } else if (widget.mode == MapViewMode.blocks) {
+      layersToQuery = ["blocks_fill"];
     } else {
-      return; // Do not process tap events for other modes.
+      return; // For other modes, we don't process tap events.
     }
 
     final features = await controller!.queryRenderedFeatures(
@@ -1144,12 +1192,23 @@ class MapViewState extends State<MapView> {
 
     if (features != null && features.isNotEmpty) {
       final feature = features.first;
-      final dynamic tazId = feature["properties"]?["taz_id"];
-      if (tazId != null) {
-        final int parsedId = int.tryParse(tazId.toString()) ?? 0;
-        debugPrint("Tapped TAZ id: $parsedId");
-        if (widget.onTazSelected != null) {
-          widget.onTazSelected!(parsedId);
+      if (widget.mode == MapViewMode.blocks) {
+        final dynamic blockId = feature["properties"]?["block_id"];
+        if (blockId != null) {
+          final int parsedId = int.tryParse(blockId.toString()) ?? 0;
+          debugPrint("Tapped Block id: $parsedId");
+          if (widget.onTazSelected != null) {
+            widget.onTazSelected!(parsedId);
+          }
+        }
+      } else {
+        final dynamic tazId = feature["properties"]?["taz_id"];
+        if (tazId != null) {
+          final int parsedId = int.tryParse(tazId.toString()) ?? 0;
+          debugPrint("Tapped TAZ id: $parsedId");
+          if (widget.onTazSelected != null) {
+            widget.onTazSelected!(parsedId);
+          }
         }
       }
     }
