@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:html' as html; // For web injection.
+import 'dart:math' show Point;
 import 'dart:math' as math; // For math calculations.
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -46,13 +47,7 @@ Future<Map<String, dynamic>> loadGeoJson(String path) async {
   return jsonDecode(str) as Map<String, dynamic>;
 }
 
-/// Helper to standardize property (column) names across different geojsons.
-/// For each feature, all keys are lowercased and type-specific renaming is applied.
-/// For example:
-/// • In new TAZ, 'taz_new1' is renamed to 'taz_id'.
-/// • In blocks, 'blockce20' is renamed to 'block_id' and 'taz_id0' (or 'taz_new1')
-///   is renamed to 'taz_id'.
-/// • In old TAZ, 'objectid' is renamed to 'object_id'.
+/// Helper to standardize property (column) names across different GeoJSON files.
 Map<String, dynamic> standardizeGeoJsonProperties(
     Map<String, dynamic> geojson, String featureType) {
   if (geojson['features'] is List) {
@@ -65,7 +60,7 @@ Map<String, dynamic> standardizeGeoJsonProperties(
         newProps[key.toLowerCase()] = value;
       });
 
-      // Apply type-specific standardization.
+      // Apply type-specific renaming.
       if (featureType == 'new_taz') {
         if (newProps.containsKey('taz_new1')) {
           newProps['taz_id'] = newProps['taz_new1'];
@@ -177,7 +172,7 @@ class _DashboardPageState extends State<DashboardPage> {
     _cachedNewTaz = await loadGeoJson('assets/geojsons/new_taz.geojson');
     _cachedBlocks = await loadGeoJson('assets/geojsons/blocks.geojson');
 
-    // Standardize column names for development:
+    // Standardize property names.
     if (_cachedOldTaz != null) {
       _cachedOldTaz = standardizeGeoJsonProperties(_cachedOldTaz!, "old_taz");
     }
@@ -266,13 +261,12 @@ class _DashboardPageState extends State<DashboardPage> {
       _searchLabel = "Currently Searching TAZ: $tazId";
       _hasSearched = true;
       _selectedTazId = tazId;
-      // Removed dummy table updates.
       _newTazTableData = [];
       _blocksTableData = [];
     });
   }
 
-  /// An editable slider+number field widget for radius.
+  /// An editable slider + number field widget for radius.
   Widget _buildRadiusControl() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8.0),
@@ -304,13 +298,11 @@ class _DashboardPageState extends State<DashboardPage> {
               decoration: const InputDecoration(
                 border: OutlineInputBorder(),
               ),
-              // Instead of updating on every change, update when editing completes.
               onEditingComplete: () {
                 double? newVal = double.tryParse(_radiusController.text);
                 if (newVal == null) {
-                  newVal = 500; // default if parsing fails
+                  newVal = 500;
                 }
-                // Clamp value to be between 500 and 5000.
                 if (newVal < 500) {
                   newVal = 500;
                 } else if (newVal > 5000) {
@@ -331,7 +323,7 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Future<void> _matchZoom() async {
-    // Optional: implement syncing zoom.
+    // Optional: implement zoom matching.
   }
 
   @override
@@ -359,7 +351,6 @@ class _DashboardPageState extends State<DashboardPage> {
                   ),
                 ),
                 const SizedBox(width: 8),
-                // Optional: This text field can be hidden if you prefer only the combined control.
                 SizedBox(
                   width: 100,
                   child: TextField(
@@ -389,19 +380,19 @@ class _DashboardPageState extends State<DashboardPage> {
               ],
             ),
           ),
-          // Editable radius slider and number.
+          // Editable radius slider.
           _buildRadiusControl(),
-          // Main Content.
+          // Main content.
           Expanded(
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Left side: 2x2 grid of maps.
+                // Left side: Grid of maps.
                 Expanded(
                   flex: 2,
                   child: Column(
                     children: [
-                      // Top row: Old TAZ and New TAZ.
+                      // Top row: Old TAZ and New TAZ maps.
                       Expanded(
                         child: Row(
                           children: [
@@ -409,31 +400,52 @@ class _DashboardPageState extends State<DashboardPage> {
                               child: MapView(
                                 key: ValueKey(
                                     "old_${_selectedTazId ?? 'none'}_${_radius.round()}"),
-                                title: "Old TAZ (Target=Blue, Others=Purple)",
+                                title:
+                                    "Old TAZ (Blue target, Purple others)\n(Tap to select)",
                                 mode: MapViewMode.oldTaz,
                                 drawShapes: _hasSearched,
                                 selectedTazId: _selectedTazId,
                                 radius: _radius,
                                 cachedOldTaz: _cachedOldTaz,
+                                onTazSelected: (int tappedId) {
+                                  setState(() {
+                                    _selectedTazId = tappedId;
+                                    _searchController.text =
+                                        tappedId.toString();
+                                    _searchLabel =
+                                        "Currently Searching TAZ: $tappedId";
+                                    _runSearch();
+                                  });
+                                },
                               ),
                             ),
                             Expanded(
                               child: MapView(
                                 key: ValueKey(
                                     "new_${_selectedTazId ?? 'none'}_${_radius.round()}"),
-                                title: "New TAZ (Red Outline)",
+                                title: "New TAZ (Red Outline)\n(Tap to select)",
                                 mode: MapViewMode.newTaz,
                                 drawShapes: _hasSearched,
                                 selectedTazId: _selectedTazId,
                                 radius: _radius,
                                 cachedOldTaz: _cachedOldTaz,
                                 cachedNewTaz: _cachedNewTaz,
+                                onTazSelected: (int tappedId) {
+                                  setState(() {
+                                    _selectedTazId = tappedId;
+                                    _searchController.text =
+                                        tappedId.toString();
+                                    _searchLabel =
+                                        "Currently Searching TAZ: $tappedId";
+                                    _runSearch();
+                                  });
+                                },
                               ),
                             ),
                           ],
                         ),
                       ),
-                      // Bottom row: Blocks and Combined.
+                      // Bottom row: Blocks and Combined maps.
                       Expanded(
                         child: Row(
                           children: [
@@ -616,6 +628,9 @@ class MapView extends StatefulWidget {
   /// Pass the spatial index for blocks if available.
   final RTree<dynamic>? blocksIndex;
 
+  /// Callback for when a TAZ is tapped.
+  final ValueChanged<int>? onTazSelected;
+
   const MapView({
     Key? key,
     required this.title,
@@ -627,6 +642,7 @@ class MapView extends StatefulWidget {
     this.cachedNewTaz,
     this.cachedBlocks,
     this.blocksIndex,
+    this.onTazSelected,
   }) : super(key: key);
 
   @override
@@ -650,16 +666,27 @@ class MapViewState extends State<MapView> {
 
   @override
   Widget build(BuildContext context) {
+    // Wrap the map in a GestureDetector to capture tap events.
     return Stack(
       children: [
-        MaplibreMap(
-          styleString: 'https://demotiles.maplibre.org/style.json',
-          onMapCreated: _onMapCreated,
-          initialCameraPosition: const CameraPosition(
-            target: LatLng(39.0, -75.0),
-            zoom: 7,
+        GestureDetector(
+          behavior: HitTestBehavior.translucent,
+          onTapDown: (TapDownDetails details) async {
+            debugPrint("GestureDetector onTapDown: ${details.globalPosition}");
+            // Convert the tap position to a Point<double> (using dart:math).
+            final tapPoint = Point<double>(
+                details.localPosition.dx, details.localPosition.dy);
+            _handleMapClick(tapPoint);
+          },
+          child: MaplibreMap(
+            styleString: 'https://demotiles.maplibre.org/style.json',
+            onMapCreated: _onMapCreated,
+            initialCameraPosition: const CameraPosition(
+              target: LatLng(39.0, -75.0),
+              zoom: 7,
+            ),
+            onStyleLoadedCallback: _onStyleLoaded,
           ),
-          onStyleLoadedCallback: _onStyleLoaded,
         ),
         Positioned(
           top: 8,
@@ -726,10 +753,7 @@ class MapViewState extends State<MapView> {
     }
   }
 
-  /// Loads all old TAZ features within the search radius.
-  /// Splits them into two groups:
-  /// - Target (selectedTazId): blue outline and blue fill.
-  /// - Others: purple outline and purple fill.
+  /// Loads old TAZ features, splits them into target (blue) and others (purple).
   Future<Map<String, dynamic>?> _loadOldTazLayers({bool zoom = true}) async {
     if (controller == null ||
         widget.selectedTazId == null ||
@@ -738,7 +762,7 @@ class MapViewState extends State<MapView> {
         await loadGeoJson('assets/geojsons/old_taz.geojson');
     final List<dynamic> allFeatures = oldTazData['features'] as List<dynamic>;
 
-    // Find the target feature.
+    // Identify the target feature.
     final targetFeature = allFeatures.firstWhere(
       (f) =>
           (f['properties'] as Map<String, dynamic>)['taz_id']?.toString() ==
@@ -746,7 +770,7 @@ class MapViewState extends State<MapView> {
       orElse: () => null,
     );
     if (targetFeature == null) {
-      debugPrint("No old TAZ found for selected ID ${widget.selectedTazId}");
+      debugPrint("No old TAZ found for ID ${widget.selectedTazId}");
       return null;
     }
     final turf.Feature targetTazFeature = turf.Feature.fromJson(targetFeature);
@@ -755,7 +779,7 @@ class MapViewState extends State<MapView> {
         targetCentroidFeature.geometry as turf.Point;
     double radiusKm = widget.radius! / 1000;
 
-    // Filter all features by distance from the target centroid.
+    // Filter features by distance from the target centroid.
     List<dynamic> withinFeatures = [];
     for (var feature in allFeatures) {
       final turf.Feature f = turf.Feature.fromJson(feature);
@@ -769,7 +793,7 @@ class MapViewState extends State<MapView> {
       }
     }
 
-    // Split features: target (blue) and others (purple).
+    // Split into target and other features.
     List<dynamic> targetFeatures = withinFeatures.where((f) {
       final props = f['properties'] as Map<String, dynamic>;
       return props['taz_id']?.toString() == widget.selectedTazId.toString();
@@ -784,7 +808,7 @@ class MapViewState extends State<MapView> {
       'features': withinFeatures,
     };
 
-    // Add target layer (blue) line.
+    // Add blue target layers.
     await _addGeoJsonSourceAndLineLayer(
       sourceId: "old_taz_target_source",
       layerId: "old_taz_target_line",
@@ -792,15 +816,6 @@ class MapViewState extends State<MapView> {
       lineColor: "#0000FF",
       lineWidth: 2.0,
     );
-    // Add others layer (purple) line.
-    await _addGeoJsonSourceAndLineLayer(
-      sourceId: "old_taz_others_source",
-      layerId: "old_taz_others_line",
-      geojsonData: {'type': 'FeatureCollection', 'features': otherFeatures},
-      lineColor: "#800080",
-      lineWidth: 2.0,
-    );
-    // Add blue target fill with 0.18 alpha.
     await _addGeoJsonSourceAndFillLayer(
       sourceId: "old_taz_target_fill_source",
       layerId: "old_taz_target_fill",
@@ -808,7 +823,14 @@ class MapViewState extends State<MapView> {
       fillColor: "#0000FF",
       fillOpacity: 0.18,
     );
-    // Add purple others fill with 0.18 alpha.
+    // Add purple layers for other features.
+    await _addGeoJsonSourceAndLineLayer(
+      sourceId: "old_taz_others_source",
+      layerId: "old_taz_others_line",
+      geojsonData: {'type': 'FeatureCollection', 'features': otherFeatures},
+      lineColor: "#800080",
+      lineWidth: 2.0,
+    );
     await _addGeoJsonSourceAndFillLayer(
       sourceId: "old_taz_others_fill_source",
       layerId: "old_taz_others_fill",
@@ -821,7 +843,7 @@ class MapViewState extends State<MapView> {
     return combinedData;
   }
 
-  /// Loads new TAZ features and adds a red line and fill (0.18 alpha).
+  /// Loads new TAZ features and applies a red outline and fill.
   Future<Map<String, dynamic>?> _loadNewTazLayers({bool zoom = true}) async {
     if (controller == null ||
         widget.selectedTazId == null ||
@@ -836,7 +858,7 @@ class MapViewState extends State<MapView> {
       orElse: () => null,
     );
     if (oldFeature == null) {
-      debugPrint("No old TAZ found for selected ID ${widget.selectedTazId}");
+      debugPrint("No old TAZ found for ID ${widget.selectedTazId}");
       return null;
     }
     final turf.Feature oldTazFeature = turf.Feature.fromJson(oldFeature);
@@ -863,7 +885,6 @@ class MapViewState extends State<MapView> {
       'type': 'FeatureCollection',
       'features': filteredNewFeatures
     };
-    // Add red line layer.
     await _addGeoJsonSourceAndLineLayer(
       sourceId: "new_taz_source",
       layerId: "new_taz_line",
@@ -871,7 +892,6 @@ class MapViewState extends State<MapView> {
       lineColor: "#FF0000",
       lineWidth: 2.0,
     );
-    // Add red fill layer with 0.18 alpha.
     await _addGeoJsonSourceAndFillLayer(
       sourceId: "new_taz_fill_source",
       layerId: "new_taz_fill",
@@ -897,7 +917,7 @@ class MapViewState extends State<MapView> {
       orElse: () => null,
     );
     if (oldFeature == null) {
-      debugPrint("No old TAZ found for selected ID ${widget.selectedTazId}");
+      debugPrint("No old TAZ found for ID ${widget.selectedTazId}");
       return null;
     }
     final turf.Feature oldTazFeature = turf.Feature.fromJson(oldFeature);
@@ -981,7 +1001,6 @@ class MapViewState extends State<MapView> {
     final turf.Point targetCentroid =
         targetCentroidFeature.geometry as turf.Point;
     double radiusKm = widget.radius! / 1000;
-    // Generate circle polygon using the helper.
     final circleFeature =
         createCirclePolygon(targetCentroid, radiusKm, steps: 64);
     await controller!.addSource(
@@ -1057,9 +1076,41 @@ class MapViewState extends State<MapView> {
       final sw = LatLng(minLat, minLng);
       final ne = LatLng(maxLat, maxLng);
       final bounds = LatLngBounds(southwest: sw, northeast: ne);
-      // Use moveCamera (instant) to preserve the zoom level.
       controller!.moveCamera(CameraUpdate.newLatLngBounds(bounds,
           left: 50, right: 50, top: 50, bottom: 50));
+    }
+  }
+
+  /// Handles a tap on the map.
+  /// Converts the tap point (a math Point<double>) to query the rendered TAZ features.
+  Future<void> _handleMapClick(Point<double> tapPoint) async {
+    if (controller == null) return;
+    // For TAZ layers, we query specific fill layers.
+    List<String> layersToQuery = [];
+    if (widget.mode == MapViewMode.oldTaz) {
+      layersToQuery = ["old_taz_target_fill", "old_taz_others_fill"];
+    } else if (widget.mode == MapViewMode.newTaz) {
+      layersToQuery = ["new_taz_fill"];
+    } else {
+      return; // Do not process tap events for other modes.
+    }
+
+    final features = await controller!.queryRenderedFeatures(
+      tapPoint,
+      layersToQuery,
+      [],
+    );
+
+    if (features != null && features.isNotEmpty) {
+      final feature = features.first;
+      final dynamic tazId = feature["properties"]?["taz_id"];
+      if (tazId != null) {
+        final int parsedId = int.tryParse(tazId.toString()) ?? 0;
+        debugPrint("Tapped TAZ id: $parsedId");
+        if (widget.onTazSelected != null) {
+          widget.onTazSelected!(parsedId);
+        }
+      }
     }
   }
 }
