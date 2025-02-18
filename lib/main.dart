@@ -20,11 +20,9 @@ Map<String, dynamic> createCirclePolygon(turf.Point center, double radius,
   double centerLat = (center.coordinates[1]! as num).toDouble();
   for (int i = 0; i <= steps; i++) {
     double angle = 2 * math.pi * i / steps;
-    // Calculate offsets in radians.
     double deltaLat = radius / earthRadius;
     double deltaLng =
         radius / (earthRadius * math.cos(centerLat * math.pi / 180));
-    // Convert offsets from radians to degrees.
     double pointLat =
         centerLat + (deltaLat * math.sin(angle)) * (180 / math.pi);
     double pointLng =
@@ -47,20 +45,17 @@ Future<Map<String, dynamic>> loadGeoJson(String path) async {
   return jsonDecode(str) as Map<String, dynamic>;
 }
 
-/// Helper to standardize property (column) names across different GeoJSON files.
+/// Standardizes property names for each GeoJSON type.
 Map<String, dynamic> standardizeGeoJsonProperties(
     Map<String, dynamic> geojson, String featureType) {
   if (geojson['features'] is List) {
     for (var feature in geojson['features']) {
       Map<String, dynamic> props =
           feature['properties'] as Map<String, dynamic>;
-      // Convert all keys to lowercase.
       Map<String, dynamic> newProps = {};
       props.forEach((key, value) {
         newProps[key.toLowerCase()] = value;
       });
-
-      // Apply type-specific renaming.
       if (featureType == 'new_taz') {
         if (newProps.containsKey('taz_new1')) {
           newProps['taz_id'] = newProps['taz_new1'];
@@ -92,7 +87,6 @@ Map<String, dynamic> standardizeGeoJsonProperties(
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
   if (kIsWeb) {
     await injectMapLibreScripts();
   }
@@ -105,7 +99,6 @@ Future<void> injectMapLibreScripts() async {
     ..rel = "stylesheet"
     ..crossOrigin = "anonymous";
   html.document.head!.append(link);
-
   final completer = Completer<void>();
   final html.ScriptElement script = html.ScriptElement()
     ..src = "https://unpkg.com/maplibre-gl@latest/dist/maplibre-gl.js"
@@ -142,7 +135,7 @@ class DashboardPage extends StatefulWidget {
 }
 
 class _DashboardPageState extends State<DashboardPage> {
-  // Controllers for user input.
+  // Input controllers.
   final TextEditingController _searchController = TextEditingController();
   final TextEditingController _radiusController =
       TextEditingController(text: "1000");
@@ -151,9 +144,9 @@ class _DashboardPageState extends State<DashboardPage> {
   List<Map<String, dynamic>> _blocksTableData = [];
   bool _hasSearched = false;
   int? _selectedTazId;
-  double _radius = 1000; // in meters
+  double _radius = 1000; // meters
 
-  // Cached GeoJSON data.
+  // Cached GeoJSON.
   Map<String, dynamic>? _cachedOldTaz;
   Map<String, dynamic>? _cachedNewTaz;
   Map<String, dynamic>? _cachedBlocks;
@@ -161,8 +154,9 @@ class _DashboardPageState extends State<DashboardPage> {
   // Spatial index for blocks.
   RTree<dynamic>? _blocksIndex;
 
-  // Keep track of selected new TAZ IDs for highlighting.
+  // Sets for selected IDs.
   final Set<int> _selectedNewTazIds = {};
+  final Set<int> _selectedBlockIds = {};
 
   @override
   void initState() {
@@ -174,8 +168,6 @@ class _DashboardPageState extends State<DashboardPage> {
     _cachedOldTaz = await loadGeoJson('assets/geojsons/old_taz.geojson');
     _cachedNewTaz = await loadGeoJson('assets/geojsons/new_taz.geojson');
     _cachedBlocks = await loadGeoJson('assets/geojsons/blocks.geojson');
-
-    // Standardize property names.
     if (_cachedOldTaz != null) {
       _cachedOldTaz = standardizeGeoJsonProperties(_cachedOldTaz!, "old_taz");
     }
@@ -185,8 +177,6 @@ class _DashboardPageState extends State<DashboardPage> {
     if (_cachedBlocks != null) {
       _cachedBlocks = standardizeGeoJsonProperties(_cachedBlocks!, "blocks");
     }
-
-    // Build spatial index for blocks.
     if (_cachedBlocks != null && _cachedBlocks!['features'] != null) {
       List<RTreeDatum<dynamic>> items = [];
       for (var feature in _cachedBlocks!['features']) {
@@ -199,7 +189,6 @@ class _DashboardPageState extends State<DashboardPage> {
     setState(() {});
   }
 
-  // Compute bounding box for a GeoJSON feature.
   math.Rectangle<double> _boundingBoxFromFeature(dynamic feature) {
     double? minLng, minLat, maxLng, maxLat;
     final geometry = feature['geometry'];
@@ -259,21 +248,18 @@ class _DashboardPageState extends State<DashboardPage> {
     }
     final radiusInput = double.tryParse(_radiusController.text.trim());
     _radius = radiusInput ?? 1000;
-
     setState(() {
       _searchLabel = "Currently Searching TAZ: $tazId";
       _hasSearched = true;
       _selectedTazId = tazId;
-      // Optionally clear table data on new search:
       _newTazTableData = [];
       _blocksTableData = [];
       _selectedNewTazIds.clear();
+      _selectedBlockIds.clear();
     });
   }
 
-  /// Toggles a new row for the New TAZ table.
-  /// If the tapped TAZ is already in the table, remove it and remove the highlight;
-  /// otherwise, add it.
+  /// Toggle a New TAZ row (and its highlight).
   void _toggleNewTazRow(int tappedId) {
     bool exists = _newTazTableData.any((row) => row['id'] == tappedId);
     if (exists) {
@@ -293,8 +279,6 @@ class _DashboardPageState extends State<DashboardPage> {
         'workrs49': 0,
         'emp49': 0,
       };
-
-      // If the new TAZ data is available, try to find the matching feature.
       if (_cachedNewTaz != null && _cachedNewTaz!['features'] != null) {
         List<dynamic> features = _cachedNewTaz!['features'];
         var matchingFeature = features.firstWhere(
@@ -316,7 +300,6 @@ class _DashboardPageState extends State<DashboardPage> {
           };
         }
       }
-
       setState(() {
         _newTazTableData.add(newRow);
         _selectedNewTazIds.add(tappedId);
@@ -324,9 +307,15 @@ class _DashboardPageState extends State<DashboardPage> {
     }
   }
 
-  /// Adds a new row for the Blocks table when a block is tapped.
-  void _addBlockRow(int tappedId) {
-    if (!_blocksTableData.any((row) => row['id'] == tappedId)) {
+  /// Toggle a Block row (and its highlight).
+  void _toggleBlockRow(int tappedId) {
+    bool exists = _blocksTableData.any((row) => row['id'] == tappedId);
+    if (exists) {
+      setState(() {
+        _blocksTableData.removeWhere((row) => row['id'] == tappedId);
+        _selectedBlockIds.remove(tappedId);
+      });
+    } else {
       Map<String, dynamic> newRow = {
         'id': tappedId,
         'hh19': 0,
@@ -338,7 +327,6 @@ class _DashboardPageState extends State<DashboardPage> {
         'workrs49': 0,
         'emp49': 0,
       };
-
       if (_cachedBlocks != null && _cachedBlocks!['features'] != null) {
         List<dynamic> features = _cachedBlocks!['features'];
         var matchingFeature = features.firstWhere(
@@ -362,11 +350,12 @@ class _DashboardPageState extends State<DashboardPage> {
       }
       setState(() {
         _blocksTableData.add(newRow);
+        _selectedBlockIds.add(tappedId);
       });
     }
   }
 
-  /// An editable slider + number field widget for radius.
+  /// Radius control slider and number field.
   Widget _buildRadiusControl() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8.0),
@@ -400,14 +389,9 @@ class _DashboardPageState extends State<DashboardPage> {
               ),
               onEditingComplete: () {
                 double? newVal = double.tryParse(_radiusController.text);
-                if (newVal == null) {
-                  newVal = 500;
-                }
-                if (newVal < 500) {
-                  newVal = 500;
-                } else if (newVal > 5000) {
-                  newVal = 5000;
-                }
+                if (newVal == null) newVal = 500;
+                if (newVal < 500) newVal = 500;
+                if (newVal > 5000) newVal = 5000;
                 setState(() {
                   _radius = newVal!;
                   _radiusController.text = newVal.round().toString();
@@ -434,7 +418,7 @@ class _DashboardPageState extends State<DashboardPage> {
       ),
       body: Column(
         children: [
-          // Top Control Bar.
+          // Top control bar.
           Padding(
             padding: const EdgeInsets.all(8.0),
             child: Row(
@@ -480,19 +464,18 @@ class _DashboardPageState extends State<DashboardPage> {
               ],
             ),
           ),
-          // Editable radius slider.
           _buildRadiusControl(),
-          // Main content.
+          // Main content: left side maps & right side tables.
           Expanded(
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Left side: Grid of maps.
+                // Left side: Maps.
                 Expanded(
                   flex: 2,
                   child: Column(
                     children: [
-                      // Top row: Old TAZ and New TAZ maps.
+                      // Top row: Old TAZ and New TAZ maps side by side.
                       Expanded(
                         child: Row(
                           children: [
@@ -500,8 +483,7 @@ class _DashboardPageState extends State<DashboardPage> {
                               child: MapView(
                                 key: ValueKey(
                                     "old_${_selectedTazId ?? 'none'}_${_radius.round()}"),
-                                title:
-                                    "Old TAZ (Blue target, Purple others)\n(Tap to select)",
+                                title: "Old TAZ (Blue target, Purple others)",
                                 mode: MapViewMode.oldTaz,
                                 drawShapes: _hasSearched,
                                 selectedTazId: _selectedTazId,
@@ -522,15 +504,13 @@ class _DashboardPageState extends State<DashboardPage> {
                               child: MapView(
                                 key: ValueKey(
                                     "new_${_selectedTazId ?? 'none'}_${_radius.round()}"),
-                                title:
-                                    "New TAZ (Red Outline)\n(Tap to toggle selection)",
+                                title: "New TAZ (Red Outline)",
                                 mode: MapViewMode.newTaz,
                                 drawShapes: _hasSearched,
                                 selectedTazId: _selectedTazId,
                                 radius: _radius,
                                 cachedOldTaz: _cachedOldTaz,
                                 cachedNewTaz: _cachedNewTaz,
-                                // Pass the selected new TAZ IDs for highlighting.
                                 selectedIds: _selectedNewTazIds,
                                 onTazSelected: (int tappedId) {
                                   _toggleNewTazRow(tappedId);
@@ -540,33 +520,15 @@ class _DashboardPageState extends State<DashboardPage> {
                           ],
                         ),
                       ),
-                      // Bottom row: Blocks and Combined maps.
+                      // Bottom row: Combined view on left, Blocks view on right.
                       Expanded(
                         child: Row(
                           children: [
                             Expanded(
                               child: MapView(
                                 key: ValueKey(
-                                    "blocks_${_selectedTazId ?? 'none'}_${_radius.round()}"),
-                                title: "Blocks\n(Tap to select)",
-                                mode: MapViewMode.blocks,
-                                drawShapes: _hasSearched,
-                                selectedTazId: _selectedTazId,
-                                radius: _radius,
-                                cachedOldTaz: _cachedOldTaz,
-                                cachedNewTaz: _cachedNewTaz,
-                                cachedBlocks: _cachedBlocks,
-                                blocksIndex: _blocksIndex,
-                                onTazSelected: (int tappedId) {
-                                  _addBlockRow(tappedId);
-                                },
-                              ),
-                            ),
-                            Expanded(
-                              child: MapView(
-                                key: ValueKey(
                                     "combined_${_selectedTazId ?? 'none'}_${_radius.round()}"),
-                                title: "Combined",
+                                title: "Combined View",
                                 mode: MapViewMode.combined,
                                 drawShapes: _hasSearched,
                                 selectedTazId: _selectedTazId,
@@ -577,13 +539,32 @@ class _DashboardPageState extends State<DashboardPage> {
                                 blocksIndex: _blocksIndex,
                               ),
                             ),
+                            Expanded(
+                              child: MapView(
+                                key: ValueKey(
+                                    "blocks_${_selectedTazId ?? 'none'}_${_radius.round()}"),
+                                title: "Blocks",
+                                mode: MapViewMode.blocks,
+                                drawShapes: _hasSearched,
+                                selectedTazId: _selectedTazId,
+                                radius: _radius,
+                                cachedOldTaz: _cachedOldTaz,
+                                cachedNewTaz: _cachedNewTaz,
+                                cachedBlocks: _cachedBlocks,
+                                blocksIndex: _blocksIndex,
+                                selectedIds: _selectedBlockIds,
+                                onTazSelected: (int tappedId) {
+                                  _toggleBlockRow(tappedId);
+                                },
+                              ),
+                            ),
                           ],
                         ),
                       ),
                     ],
                   ),
                 ),
-                // Right side: Data Tables.
+                // Right side: Data tables.
                 Container(
                   width: 400,
                   padding: const EdgeInsets.all(8.0),
@@ -716,20 +697,12 @@ class MapView extends StatefulWidget {
   final MapViewMode mode;
   final bool drawShapes;
   final int? selectedTazId;
-  final double? radius; // in meters
-
-  // Cached GeoJSON data.
+  final double? radius;
   final Map<String, dynamic>? cachedOldTaz;
   final Map<String, dynamic>? cachedNewTaz;
   final Map<String, dynamic>? cachedBlocks;
-
-  /// Pass the spatial index for blocks if available.
   final RTree<dynamic>? blocksIndex;
-
-  /// Callback for when a geometry is tapped.
   final ValueChanged<int>? onTazSelected;
-
-  /// New optional parameter for selected IDs (for new TAZ mode)
   final Set<int>? selectedIds;
 
   const MapView({
@@ -758,13 +731,19 @@ class MapViewState extends State<MapView> {
   @override
   void didUpdateWidget(covariant MapView oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // If the selection has changed in new TAZ mode, update the filter.
     if (widget.mode == MapViewMode.newTaz && controller != null) {
       final newFilter =
           (widget.selectedIds != null && widget.selectedIds!.isNotEmpty)
               ? ["in", "taz_id", ...widget.selectedIds!.toList()]
               : ["==", "taz_id", ""];
       controller!.setFilter("selected_new_taz_fill", newFilter);
+    }
+    if (widget.mode == MapViewMode.blocks && controller != null) {
+      final newFilter =
+          (widget.selectedIds != null && widget.selectedIds!.isNotEmpty)
+              ? ["in", "block_id", ...widget.selectedIds!.toList()]
+              : ["==", "block_id", ""];
+      controller!.setFilter("selected_blocks_fill", newFilter);
     }
     if (oldWidget.selectedTazId != widget.selectedTazId ||
         oldWidget.drawShapes != widget.drawShapes ||
@@ -776,14 +755,12 @@ class MapViewState extends State<MapView> {
 
   @override
   Widget build(BuildContext context) {
-    // Wrap the map in a GestureDetector to capture tap events.
     return Stack(
       children: [
         GestureDetector(
           behavior: HitTestBehavior.translucent,
           onTapDown: (TapDownDetails details) async {
             debugPrint("GestureDetector onTapDown: ${details.globalPosition}");
-            // Convert the tap position to a Point<double>.
             final tapPoint = Point<double>(
                 details.localPosition.dx, details.localPosition.dy);
             _handleMapClick(tapPoint);
@@ -805,7 +782,10 @@ class MapViewState extends State<MapView> {
             color: Colors.white70,
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             child: Text(
-              widget.title,
+              (widget.mode == MapViewMode.oldTaz ||
+                      widget.mode == MapViewMode.newTaz)
+                  ? "${widget.title}\nTAZ: ${widget.selectedTazId ?? 'None'}"
+                  : widget.title,
               style: const TextStyle(fontWeight: FontWeight.bold),
             ),
           ),
@@ -832,7 +812,6 @@ class MapViewState extends State<MapView> {
         await _loadRadiusCircle();
       } else if (widget.mode == MapViewMode.newTaz) {
         await _loadNewTazLayers();
-        // Add an overlay layer for highlighting selected new TAZ features.
         await controller!.addFillLayer(
           "new_taz_source",
           "selected_new_taz_fill",
@@ -846,6 +825,23 @@ class MapViewState extends State<MapView> {
         );
       } else if (widget.mode == MapViewMode.blocks) {
         await _loadBlocksFill();
+        // Add block outlines (black)
+        await controller!.addLineLayer(
+          "blocks_source",
+          "blocks_outline",
+          LineLayerProperties(lineColor: "#000000", lineWidth: 1.5),
+        );
+        await controller!.addFillLayer(
+          "blocks_source",
+          "selected_blocks_fill",
+          FillLayerProperties(
+            fillColor: "#FFFF00", // Yellow highlight.
+            fillOpacity: 0.5,
+          ),
+          filter: (widget.selectedIds != null && widget.selectedIds!.isNotEmpty)
+              ? ["in", "block_id", ...widget.selectedIds!.toList()]
+              : ["==", "block_id", ""],
+        );
       } else if (widget.mode == MapViewMode.combined) {
         final blocksData = await _loadBlocksFill(zoom: false);
         final oldData = await _loadOldTazLayers(zoom: false);
@@ -875,7 +871,6 @@ class MapViewState extends State<MapView> {
     }
   }
 
-  /// Loads old TAZ features, splits them into target (blue) and others (purple).
   Future<Map<String, dynamic>?> _loadOldTazLayers({bool zoom = true}) async {
     if (controller == null ||
         widget.selectedTazId == null ||
@@ -883,8 +878,6 @@ class MapViewState extends State<MapView> {
     final oldTazData = widget.cachedOldTaz ??
         await loadGeoJson('assets/geojsons/old_taz.geojson');
     final List<dynamic> allFeatures = oldTazData['features'] as List<dynamic>;
-
-    // Identify the target feature.
     final targetFeature = allFeatures.firstWhere(
       (f) =>
           (f['properties'] as Map<String, dynamic>)['taz_id']?.toString() ==
@@ -900,8 +893,6 @@ class MapViewState extends State<MapView> {
     final turf.Point targetCentroid =
         targetCentroidFeature.geometry as turf.Point;
     double radiusKm = widget.radius! / 1000;
-
-    // Filter features by distance from the target centroid.
     List<dynamic> withinFeatures = [];
     for (var feature in allFeatures) {
       final turf.Feature f = turf.Feature.fromJson(feature);
@@ -914,8 +905,6 @@ class MapViewState extends State<MapView> {
         withinFeatures.add(feature);
       }
     }
-
-    // Split into target and other features.
     List<dynamic> targetFeatures = withinFeatures.where((f) {
       final props = f['properties'] as Map<String, dynamic>;
       return props['taz_id']?.toString() == widget.selectedTazId.toString();
@@ -924,13 +913,10 @@ class MapViewState extends State<MapView> {
       final props = f['properties'] as Map<String, dynamic>;
       return props['taz_id']?.toString() != widget.selectedTazId.toString();
     }).toList();
-
     final combinedData = {
       'type': 'FeatureCollection',
       'features': withinFeatures,
     };
-
-    // Add blue target layers.
     await _addGeoJsonSourceAndLineLayer(
       sourceId: "old_taz_target_source",
       layerId: "old_taz_target_line",
@@ -945,7 +931,6 @@ class MapViewState extends State<MapView> {
       fillColor: "#0000FF",
       fillOpacity: 0.18,
     );
-    // Add purple layers for other features.
     await _addGeoJsonSourceAndLineLayer(
       sourceId: "old_taz_others_source",
       layerId: "old_taz_others_line",
@@ -960,12 +945,10 @@ class MapViewState extends State<MapView> {
       fillColor: "#800080",
       fillOpacity: 0.18,
     );
-
     if (zoom) await _zoomToFeatureBounds(combinedData);
     return combinedData;
   }
 
-  /// Loads new TAZ features and applies a red outline and fill.
   Future<Map<String, dynamic>?> _loadNewTazLayers({bool zoom = true}) async {
     if (controller == null ||
         widget.selectedTazId == null ||
@@ -1046,7 +1029,6 @@ class MapViewState extends State<MapView> {
     final oldCentroidFeature = turf.centroid(oldTazFeature);
     final turf.Point oldCentroid = oldCentroidFeature.geometry as turf.Point;
     double radiusKm = widget.radius! / 1000;
-
     final double centerLat = (oldCentroid.coordinates[1]!).toDouble();
     final double centerLng = (oldCentroid.coordinates[0]!).toDouble();
     final double deltaLat = radiusKm / 110.574;
@@ -1054,7 +1036,6 @@ class MapViewState extends State<MapView> {
         radiusKm / (111.320 * math.cos(centerLat * math.pi / 180));
     final math.Rectangle<double> circleBBox = math.Rectangle(
         centerLng - deltaLng, centerLat - deltaLat, 2 * deltaLng, 2 * deltaLat);
-
     List<dynamic> candidateBlocks = [];
     if (widget.blocksIndex != null) {
       math.Rectangle<num> searchRect = math.Rectangle<num>(
@@ -1067,7 +1048,6 @@ class MapViewState extends State<MapView> {
       candidateBlocks =
           (widget.cachedBlocks?['features'] as List<dynamic>) ?? [];
     }
-
     final filteredBlocks = candidateBlocks.where((block) {
       final turf.Feature blockFeature = turf.Feature.fromJson(block);
       final blockCentroidFeature = turf.centroid(blockFeature);
@@ -1086,7 +1066,6 @@ class MapViewState extends State<MapView> {
           .toDouble();
       return distance <= radiusKm;
     }).toList();
-
     if (filteredBlocks.isEmpty) {
       debugPrint("No blocks within the radius.");
       return null;
@@ -1097,13 +1076,13 @@ class MapViewState extends State<MapView> {
     };
     await controller!.addSource(
         "blocks_source", GeojsonSourceProperties(data: filteredBlocksData));
+    // Base layer: light gray fill.
     await controller!.addFillLayer("blocks_source", "blocks_fill",
-        FillLayerProperties(fillColor: "#FFFF00", fillOpacity: 0.4));
+        FillLayerProperties(fillColor: "#DDDDDD", fillOpacity: 0.3));
     if (zoom) await _zoomToFeatureBounds(filteredBlocksData);
     return filteredBlocksData;
   }
 
-  /// Draws a circle representing the search radius.
   Future<void> _loadRadiusCircle() async {
     if (controller == null ||
         widget.selectedTazId == null ||
@@ -1203,10 +1182,8 @@ class MapViewState extends State<MapView> {
     }
   }
 
-  /// Handles a tap on the map.
   Future<void> _handleMapClick(Point<double> tapPoint) async {
     if (controller == null) return;
-    // Determine which layers to query based on mode.
     List<String> layersToQuery = [];
     if (widget.mode == MapViewMode.oldTaz) {
       layersToQuery = ["old_taz_target_fill", "old_taz_others_fill"];
@@ -1217,13 +1194,11 @@ class MapViewState extends State<MapView> {
     } else {
       return;
     }
-
     final features = await controller!.queryRenderedFeatures(
       tapPoint,
       layersToQuery,
       [],
     );
-
     if (features != null && features.isNotEmpty) {
       final feature = features.first;
       if (widget.mode == MapViewMode.blocks) {
