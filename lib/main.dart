@@ -261,9 +261,32 @@ class _DashboardPageState extends State<DashboardPage> {
       _searchLabel = "Currently Searching TAZ: $tazId";
       _hasSearched = true;
       _selectedTazId = tazId;
+      // Optionally clear table data on new search:
       _newTazTableData = [];
       _blocksTableData = [];
     });
+  }
+
+  /// Adds a new row for the New TAZ table if the tapped TAZ isn't already in the list.
+  void _addNewTazRow(int tappedId) {
+    if (!_newTazTableData.any((row) => row['id'] == tappedId)) {
+      // You can replace the following placeholder data with real values.
+      final newRow = {
+        'id': tappedId,
+        'hh19': 0,
+        'persns19': 0,
+        'workrs19': 0,
+        'emp19': 0,
+        'hh49': 0,
+        'persns49': 0,
+        'workrs49': 0,
+        'emp49': 0,
+      };
+
+      setState(() {
+        _newTazTableData.add(newRow);
+      });
+    }
   }
 
   /// An editable slider + number field widget for radius.
@@ -414,8 +437,9 @@ class _DashboardPageState extends State<DashboardPage> {
                                         tappedId.toString();
                                     _searchLabel =
                                         "Currently Searching TAZ: $tappedId";
-                                    _runSearch();
                                   });
+                                  // No search even when old taz is selected
+                                  // _runSearch();
                                 },
                               ),
                             ),
@@ -437,8 +461,9 @@ class _DashboardPageState extends State<DashboardPage> {
                                         tappedId.toString();
                                     _searchLabel =
                                         "Currently Searching TAZ: $tappedId";
-                                    _runSearch();
                                   });
+                                  // Add the tapped TAZ to the New TAZ table.
+                                  _addNewTazRow(tappedId);
                                 },
                               ),
                             ),
