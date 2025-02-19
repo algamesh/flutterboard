@@ -704,7 +704,6 @@ class MapView extends StatefulWidget {
   final RTree<dynamic>? blocksIndex;
   final ValueChanged<int>? onTazSelected;
   final Set<int>? selectedIds;
-
   const MapView({
     Key? key,
     required this.title,
@@ -719,7 +718,6 @@ class MapView extends StatefulWidget {
     this.onTazSelected,
     this.selectedIds,
   }) : super(key: key);
-
   @override
   MapViewState createState() => MapViewState();
 }
@@ -727,7 +725,6 @@ class MapView extends StatefulWidget {
 class MapViewState extends State<MapView> {
   MaplibreMapController? controller;
   bool _hasLoadedLayers = false;
-
   @override
   void didUpdateWidget(covariant MapView oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -825,7 +822,7 @@ class MapViewState extends State<MapView> {
         );
       } else if (widget.mode == MapViewMode.blocks) {
         await _loadBlocksFill();
-        // Add block outlines (black)
+        // Add black outlines.
         await controller!.addLineLayer(
           "blocks_source",
           "blocks_outline",
@@ -835,8 +832,8 @@ class MapViewState extends State<MapView> {
           "blocks_source",
           "selected_blocks_fill",
           FillLayerProperties(
-            fillColor: "#FFFF00", // Yellow highlight.
-            fillOpacity: 0.5,
+            fillColor: "#FFFF00", // Yellow highlight when selected.
+            fillOpacity: 0.8,
           ),
           filter: (widget.selectedIds != null && widget.selectedIds!.isNotEmpty)
               ? ["in", "block_id", ...widget.selectedIds!.toList()]
@@ -1076,9 +1073,9 @@ class MapViewState extends State<MapView> {
     };
     await controller!.addSource(
         "blocks_source", GeojsonSourceProperties(data: filteredBlocksData));
-    // Base layer: light gray fill.
+    // Base layer: orange fill.
     await controller!.addFillLayer("blocks_source", "blocks_fill",
-        FillLayerProperties(fillColor: "#DDDDDD", fillOpacity: 0.3));
+        FillLayerProperties(fillColor: "#FFA500", fillOpacity: 0.5));
     if (zoom) await _zoomToFeatureBounds(filteredBlocksData);
     return filteredBlocksData;
   }
