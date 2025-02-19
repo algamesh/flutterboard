@@ -755,9 +755,8 @@ class MapViewState extends State<MapView> {
             _handleMapClick(tapPoint);
           },
           child: MaplibreMap(
-            styleString: 'https://demotiles.maplibre.org/style.json',
-            // styleString:
-            //     'https://tile.openstreetmap.org/style.json', // Or a custom style using OSM sources,
+            styleString:
+                'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json',
             onMapCreated: _onMapCreated,
             initialCameraPosition: const CameraPosition(
               target: LatLng(39.0, -75.0),
