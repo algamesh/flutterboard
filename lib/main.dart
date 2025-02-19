@@ -62,9 +62,11 @@ Map<String, dynamic> standardizeGeoJsonProperties(
           newProps.remove('taz_new1');
         }
       } else if (featureType == 'blocks') {
-        if (newProps.containsKey('blockce20')) {
-          newProps['block_id'] = newProps['blockce20'];
-          newProps.remove('blockce20');
+        // Now using GEOID20 as the block id.
+        if (newProps.containsKey('geoid20')) {
+          // Make sure it is an integer.
+          newProps['geoid20'] = int.tryParse(newProps['geoid20'].toString()) ??
+              newProps['geoid20'];
         }
         if (newProps.containsKey('taz_id0')) {
           newProps['taz_id'] = newProps['taz_id0'];
@@ -156,7 +158,7 @@ class _DashboardPageState extends State<DashboardPage> {
 
   // Sets for selected IDs.
   final Set<int> _selectedNewTazIds = {};
-  final Set<int> _selectedBlockIds = {};
+  Set<int> _selectedBlockIds = {};
 
   @override
   void initState() {
@@ -310,49 +312,48 @@ class _DashboardPageState extends State<DashboardPage> {
   /// Toggle a Block row (and its highlight).
   void _toggleBlockRow(int tappedId) {
     bool exists = _blocksTableData.any((row) => row['id'] == tappedId);
-    if (exists) {
-      setState(() {
+    setState(() {
+      if (exists) {
         _blocksTableData.removeWhere((row) => row['id'] == tappedId);
-        _selectedBlockIds.remove(tappedId);
-      });
-    } else {
-      Map<String, dynamic> newRow = {
-        'id': tappedId,
-        'hh19': 0,
-        'persns19': 0,
-        'workrs19': 0,
-        'emp19': 0,
-        'hh49': 0,
-        'persns49': 0,
-        'workrs49': 0,
-        'emp49': 0,
-      };
-      if (_cachedBlocks != null && _cachedBlocks!['features'] != null) {
-        List<dynamic> features = _cachedBlocks!['features'];
-        var matchingFeature = features.firstWhere(
-          (f) => f['properties']?['block_id'].toString() == tappedId.toString(),
-          orElse: () => null,
-        );
-        if (matchingFeature != null) {
-          final props = matchingFeature['properties'] as Map<String, dynamic>;
-          newRow = {
-            'id': tappedId,
-            'hh19': props['hh19'] ?? 0,
-            'persns19': props['persns19'] ?? 0,
-            'workrs19': props['workrs19'] ?? 0,
-            'emp19': props['emp19'] ?? 0,
-            'hh49': props['hh49'] ?? 0,
-            'persns49': props['persns49'] ?? 0,
-            'workrs49': props['workrs49'] ?? 0,
-            'emp49': props['emp49'] ?? 0,
-          };
+        _selectedBlockIds = {..._selectedBlockIds}..remove(tappedId);
+      } else {
+        Map<String, dynamic> newRow = {
+          'id': tappedId,
+          'hh19': 0,
+          'persns19': 0,
+          'workrs19': 0,
+          'emp19': 0,
+          'hh49': 0,
+          'persns49': 0,
+          'workrs49': 0,
+          'emp49': 0,
+        };
+        if (_cachedBlocks != null && _cachedBlocks!['features'] != null) {
+          List<dynamic> features = _cachedBlocks!['features'];
+          var matchingFeature = features.firstWhere(
+            (f) =>
+                f['properties']?['geoid20'].toString() == tappedId.toString(),
+            orElse: () => null,
+          );
+          if (matchingFeature != null) {
+            final props = matchingFeature['properties'] as Map<String, dynamic>;
+            newRow = {
+              'id': tappedId,
+              'hh19': props['hh19'] ?? 0,
+              'persns19': props['persns19'] ?? 0,
+              'workrs19': props['workrs19'] ?? 0,
+              'emp19': props['emp19'] ?? 0,
+              'hh49': props['hh49'] ?? 0,
+              'persns49': props['persns49'] ?? 0,
+              'workrs49': props['workrs49'] ?? 0,
+              'emp49': props['emp49'] ?? 0,
+            };
+          }
         }
-      }
-      setState(() {
         _blocksTableData.add(newRow);
-        _selectedBlockIds.add(tappedId);
-      });
-    }
+        _selectedBlockIds = {..._selectedBlockIds}..add(tappedId);
+      }
+    });
   }
 
   /// Radius control slider and number field.
@@ -725,6 +726,7 @@ class MapView extends StatefulWidget {
 class MapViewState extends State<MapView> {
   MaplibreMapController? controller;
   bool _hasLoadedLayers = false;
+
   @override
   void didUpdateWidget(covariant MapView oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -738,8 +740,8 @@ class MapViewState extends State<MapView> {
     if (widget.mode == MapViewMode.blocks && controller != null) {
       final newFilter =
           (widget.selectedIds != null && widget.selectedIds!.isNotEmpty)
-              ? ["in", "block_id", ...widget.selectedIds!.toList()]
-              : ["==", "block_id", ""];
+              ? ["in", "geoid20", ...widget.selectedIds!.toList()]
+              : ["==", "geoid20", ""];
       controller!.setFilter("selected_blocks_fill", newFilter);
     }
     if (oldWidget.selectedTazId != widget.selectedTazId ||
@@ -836,8 +838,8 @@ class MapViewState extends State<MapView> {
             fillOpacity: 0.8,
           ),
           filter: (widget.selectedIds != null && widget.selectedIds!.isNotEmpty)
-              ? ["in", "block_id", ...widget.selectedIds!.toList()]
-              : ["==", "block_id", ""],
+              ? ["in", "geoid20", ...widget.selectedIds!.toList()]
+              : ["==", "geoid20", ""],
         );
       } else if (widget.mode == MapViewMode.combined) {
         final blocksData = await _loadBlocksFill(zoom: false);
@@ -1032,7 +1034,12 @@ class MapViewState extends State<MapView> {
     final double deltaLng =
         radiusKm / (111.320 * math.cos(centerLat * math.pi / 180));
     final math.Rectangle<double> circleBBox = math.Rectangle(
-        centerLng - deltaLng, centerLat - deltaLat, 2 * deltaLng, 2 * deltaLat);
+      centerLng - deltaLng,
+      centerLat - deltaLat,
+      2 * deltaLng,
+      2 * deltaLat,
+    );
+
     List<dynamic> candidateBlocks = [];
     if (widget.blocksIndex != null) {
       math.Rectangle<num> searchRect = math.Rectangle<num>(
@@ -1045,6 +1052,7 @@ class MapViewState extends State<MapView> {
       candidateBlocks =
           (widget.cachedBlocks?['features'] as List<dynamic>) ?? [];
     }
+
     final filteredBlocks = candidateBlocks.where((block) {
       final turf.Feature blockFeature = turf.Feature.fromJson(block);
       final blockCentroidFeature = turf.centroid(blockFeature);
@@ -1063,6 +1071,7 @@ class MapViewState extends State<MapView> {
           .toDouble();
       return distance <= radiusKm;
     }).toList();
+
     if (filteredBlocks.isEmpty) {
       debugPrint("No blocks within the radius.");
       return null;
@@ -1071,11 +1080,37 @@ class MapViewState extends State<MapView> {
       'type': 'FeatureCollection',
       'features': filteredBlocks
     };
-    await controller!.addSource(
-        "blocks_source", GeojsonSourceProperties(data: filteredBlocksData));
-    // Base layer: orange fill.
-    await controller!.addFillLayer("blocks_source", "blocks_fill",
-        FillLayerProperties(fillColor: "#FFA500", fillOpacity: 0.5));
+// Add the blocks line layer.
+    await _addGeoJsonSourceAndLineLayer(
+      sourceId: "blocks_line_source",
+      layerId: "blocks_line",
+      geojsonData: filteredBlocksData,
+      lineColor: "#000000", // Black outline.
+      lineWidth: 1.0, // Thinner lines.
+    );
+
+// Add the blocks fill layer.
+    await _addGeoJsonSourceAndFillLayer(
+      sourceId: "blocks_fill_source",
+      layerId: "blocks_fill",
+      geojsonData: filteredBlocksData,
+      fillColor: "#FFA500", // Orange fill.
+      fillOpacity: 0.18,
+    );
+
+    // Add a highlight fill layer (yellow) for selected blocks.
+    await controller!.addFillLayer(
+      "blocks_fill_source",
+      "selected_blocks_fill",
+      FillLayerProperties(
+        fillColor: "#FFFF00", // Yellow highlight.
+        fillOpacity: 0.5,
+      ),
+      filter: (widget.selectedIds != null && widget.selectedIds!.isNotEmpty)
+          ? ["in", "geoid20", ...widget.selectedIds!.toList()]
+          : ["==", "geoid20", ""],
+    );
+
     if (zoom) await _zoomToFeatureBounds(filteredBlocksData);
     return filteredBlocksData;
   }
@@ -1199,7 +1234,7 @@ class MapViewState extends State<MapView> {
     if (features != null && features.isNotEmpty) {
       final feature = features.first;
       if (widget.mode == MapViewMode.blocks) {
-        final dynamic blockId = feature["properties"]?["block_id"];
+        final dynamic blockId = feature["properties"]?["geoid20"];
         if (blockId != null) {
           final int parsedId = int.tryParse(blockId.toString()) ?? 0;
           debugPrint("Tapped Block id: $parsedId");
