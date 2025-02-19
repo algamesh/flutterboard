@@ -64,7 +64,6 @@ Map<String, dynamic> standardizeGeoJsonProperties(
       } else if (featureType == 'blocks') {
         // Now using GEOID20 as the block id.
         if (newProps.containsKey('geoid20')) {
-          // Make sure it is an integer.
           newProps['geoid20'] = int.tryParse(newProps['geoid20'].toString()) ??
               newProps['geoid20'];
         }
@@ -124,7 +123,27 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'VizTAZ Dashboard',
-      theme: ThemeData(primarySwatch: Colors.blue),
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        primarySwatch: Colors.blue,
+        // Set a very light blue background.
+        scaffoldBackgroundColor: const Color.fromARGB(
+            255, 249, 253, 255), // Updated to a lighter blue.
+        // Use black text for buttons and a slightly lighter blue for the buttons.
+        elevatedButtonTheme: ElevatedButtonThemeData(
+          style: ElevatedButton.styleFrom(
+            backgroundColor:
+                const Color.fromARGB(255, 184, 233, 254), // Lighter blue
+            foregroundColor: Colors.black,
+          ),
+        ),
+        // Slider theme based on blue
+        sliderTheme: SliderThemeData(
+          activeTrackColor: const Color(0xFF4169E1), // Royal blue
+          inactiveTrackColor: Colors.blue.shade100,
+          thumbColor: const Color(0xFF4169E1),
+        ),
+      ),
       home: const DashboardPage(),
     );
   }
@@ -159,6 +178,16 @@ class _DashboardPageState extends State<DashboardPage> {
   // Sets for selected IDs.
   final Set<int> _selectedNewTazIds = {};
   Set<int> _selectedBlockIds = {};
+
+  // Background style selection for maps.
+  String _selectedMapStyleName = 'Positron';
+  final Map<String, String> _mapStyles = {
+    'Positron': 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json',
+    'Dark Matter':
+        'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+    'Satellite':
+        'https://api.maptiler.com/maps/hybrid/style.json?key=YOUR_MAPTILER_KEY',
+  };
 
   @override
   void initState() {
@@ -364,19 +393,26 @@ class _DashboardPageState extends State<DashboardPage> {
         children: [
           const Text("Radius (m):"),
           const SizedBox(width: 5),
+          // Wrap Slider with SliderTheme to apply blue colors.
           Expanded(
-            child: Slider(
-              min: 500,
-              max: 5000,
-              divisions: 45,
-              label: "${_radius.round()}",
-              value: _radius,
-              onChanged: (value) {
-                setState(() {
-                  _radius = value;
-                  _radiusController.text = value.round().toString();
-                });
-              },
+            child: SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                activeTrackColor: const Color(0xFF4169E1),
+                thumbColor: const Color(0xFF4169E1),
+              ),
+              child: Slider(
+                min: 500,
+                max: 5000,
+                divisions: 45,
+                label: "${_radius.round()}",
+                value: _radius,
+                onChanged: (value) {
+                  setState(() {
+                    _radius = value;
+                    _radiusController.text = value.round().toString();
+                  });
+                },
+              ),
             ),
           ),
           const SizedBox(width: 8),
@@ -386,6 +422,8 @@ class _DashboardPageState extends State<DashboardPage> {
               controller: _radiusController,
               keyboardType: TextInputType.number,
               decoration: const InputDecoration(
+                filled: true,
+                fillColor: Colors.white,
                 border: OutlineInputBorder(),
               ),
               onEditingComplete: () {
@@ -414,12 +452,46 @@ class _DashboardPageState extends State<DashboardPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        backgroundColor: const Color.fromARGB(
+            255, 219, 243, 255), // Customize the background color here.
         title: Text(_searchLabel),
         centerTitle: true,
+        actions: [
+          Container(
+            margin: const EdgeInsets.symmetric(horizontal: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color:
+                  Colors.white, // A white background to contrast the app bar.
+              border: Border.all(color: Colors.blueAccent, width: 2),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: DropdownButton<String>(
+              value: _selectedMapStyleName,
+              icon: const Icon(Icons.keyboard_arrow_down,
+                  color: Colors.blueAccent),
+              dropdownColor: Colors.white,
+              style: const TextStyle(
+                  color: Colors.blueAccent, fontWeight: FontWeight.bold),
+              underline: const SizedBox(),
+              onChanged: (newValue) {
+                setState(() {
+                  _selectedMapStyleName = newValue!;
+                });
+              },
+              items: _mapStyles.keys.map((styleName) {
+                return DropdownMenuItem<String>(
+                  value: styleName,
+                  child: Text(styleName),
+                );
+              }).toList(),
+            ),
+          ),
+        ],
       ),
       body: Column(
         children: [
-          // Top control bar with radius control to the right of the search label.
+          // Top control bar with radius control and search field.
           Padding(
             padding: const EdgeInsets.all(8.0),
             child: Row(
@@ -430,12 +502,13 @@ class _DashboardPageState extends State<DashboardPage> {
                     controller: _searchController,
                     decoration: const InputDecoration(
                       labelText: "Old TAZ ID",
+                      filled: true,
+                      fillColor: Colors.white,
                       border: OutlineInputBorder(),
                     ),
                     onSubmitted: (_) => _runSearch(),
                   ),
                 ),
-
                 const SizedBox(width: 8),
                 ElevatedButton(
                   onPressed: _runSearch,
@@ -454,8 +527,6 @@ class _DashboardPageState extends State<DashboardPage> {
               ],
             ),
           ),
-
-          // _buildRadiusControl(),
           // Main content: left side maps & right side tables.
           Expanded(
             child: Row(
@@ -470,83 +541,128 @@ class _DashboardPageState extends State<DashboardPage> {
                       Expanded(
                         child: Row(
                           children: [
+                            // Wrap each map in a container with a border.
                             Expanded(
-                              child: MapView(
-                                key: ValueKey(
-                                    "old_${_selectedTazId ?? 'none'}_${_radius.round()}"),
-                                title: "Old TAZ (Blue target, Purple others)",
-                                mode: MapViewMode.oldTaz,
-                                drawShapes: _hasSearched,
-                                selectedTazId: _selectedTazId,
-                                radius: _radius,
-                                cachedOldTaz: _cachedOldTaz,
-                                onTazSelected: (int tappedId) {
-                                  setState(() {
-                                    _selectedTazId = tappedId;
-                                    _searchController.text =
-                                        tappedId.toString();
-                                    _searchLabel =
-                                        "Currently Searching TAZ: $tappedId";
-                                  });
-                                },
+                              child: Container(
+                                margin: const EdgeInsets.all(4),
+                                decoration: BoxDecoration(
+                                  border:
+                                      Border.all(color: Colors.grey.shade400),
+                                ),
+                                child: MapView(
+                                  key: ValueKey(
+                                      "old_${_selectedTazId ?? 'none'}_${_radius.round()}"),
+                                  title: "Old TAZ (Blue target, Blue others)",
+                                  mode: MapViewMode.oldTaz,
+                                  drawShapes: _hasSearched,
+                                  selectedTazId: _selectedTazId,
+                                  radius: _radius,
+                                  cachedOldTaz: _cachedOldTaz,
+                                  onTazSelected: (int tappedId) {
+                                    setState(() {
+                                      _selectedTazId = tappedId;
+                                      _searchController.text =
+                                          tappedId.toString();
+                                      _searchLabel =
+                                          "Currently Searching TAZ: $tappedId";
+                                    });
+                                  },
+                                  mapStyle: _mapStyles[_selectedMapStyleName],
+                                ),
                               ),
                             ),
+                            const VerticalDivider(
+                              width: 1,
+                              color: Colors.grey,
+                            ),
                             Expanded(
-                              child: MapView(
-                                key: ValueKey(
-                                    "new_${_selectedTazId ?? 'none'}_${_radius.round()}"),
-                                title: "New TAZ (Red Outline)",
-                                mode: MapViewMode.newTaz,
-                                drawShapes: _hasSearched,
-                                selectedTazId: _selectedTazId,
-                                radius: _radius,
-                                cachedOldTaz: _cachedOldTaz,
-                                cachedNewTaz: _cachedNewTaz,
-                                selectedIds: _selectedNewTazIds,
-                                onTazSelected: (int tappedId) {
-                                  _toggleNewTazRow(tappedId);
-                                },
+                              child: Container(
+                                margin: const EdgeInsets.all(4),
+                                decoration: BoxDecoration(
+                                  border:
+                                      Border.all(color: Colors.grey.shade400),
+                                ),
+                                child: MapView(
+                                  key: ValueKey(
+                                      "new_${_selectedTazId ?? 'none'}_${_radius.round()}"),
+                                  title: "New TAZ (Red Outline)",
+                                  mode: MapViewMode.newTaz,
+                                  drawShapes: _hasSearched,
+                                  selectedTazId: _selectedTazId,
+                                  radius: _radius,
+                                  cachedOldTaz: _cachedOldTaz,
+                                  cachedNewTaz: _cachedNewTaz,
+                                  selectedIds: _selectedNewTazIds,
+                                  onTazSelected: (int tappedId) {
+                                    _toggleNewTazRow(tappedId);
+                                  },
+                                  mapStyle: _mapStyles[_selectedMapStyleName],
+                                ),
                               ),
                             ),
                           ],
                         ),
+                      ),
+                      const Divider(
+                        height: 1,
+                        color: Colors.grey,
                       ),
                       // Bottom row: Combined view on left, Blocks view on right.
                       Expanded(
                         child: Row(
                           children: [
                             Expanded(
-                              child: MapView(
-                                key: ValueKey(
-                                    "combined_${_selectedTazId ?? 'none'}_${_radius.round()}"),
-                                title: "Combined View",
-                                mode: MapViewMode.combined,
-                                drawShapes: _hasSearched,
-                                selectedTazId: _selectedTazId,
-                                radius: _radius,
-                                cachedOldTaz: _cachedOldTaz,
-                                cachedNewTaz: _cachedNewTaz,
-                                cachedBlocks: _cachedBlocks,
-                                blocksIndex: _blocksIndex,
+                              child: Container(
+                                margin: const EdgeInsets.all(4),
+                                decoration: BoxDecoration(
+                                  border:
+                                      Border.all(color: Colors.grey.shade400),
+                                ),
+                                child: MapView(
+                                  key: ValueKey(
+                                      "combined_${_selectedTazId ?? 'none'}_${_radius.round()}"),
+                                  title: "Combined View",
+                                  mode: MapViewMode.combined,
+                                  drawShapes: _hasSearched,
+                                  selectedTazId: _selectedTazId,
+                                  radius: _radius,
+                                  cachedOldTaz: _cachedOldTaz,
+                                  cachedNewTaz: _cachedNewTaz,
+                                  cachedBlocks: _cachedBlocks,
+                                  blocksIndex: _blocksIndex,
+                                  mapStyle: _mapStyles[_selectedMapStyleName],
+                                ),
                               ),
                             ),
+                            const VerticalDivider(
+                              width: 1,
+                              color: Colors.grey,
+                            ),
                             Expanded(
-                              child: MapView(
-                                key: ValueKey(
-                                    "blocks_${_selectedTazId ?? 'none'}_${_radius.round()}"),
-                                title: "Blocks",
-                                mode: MapViewMode.blocks,
-                                drawShapes: _hasSearched,
-                                selectedTazId: _selectedTazId,
-                                radius: _radius,
-                                cachedOldTaz: _cachedOldTaz,
-                                cachedNewTaz: _cachedNewTaz,
-                                cachedBlocks: _cachedBlocks,
-                                blocksIndex: _blocksIndex,
-                                selectedIds: _selectedBlockIds,
-                                onTazSelected: (int tappedId) {
-                                  _toggleBlockRow(tappedId);
-                                },
+                              child: Container(
+                                margin: const EdgeInsets.all(4),
+                                decoration: BoxDecoration(
+                                  border:
+                                      Border.all(color: Colors.grey.shade400),
+                                ),
+                                child: MapView(
+                                  key: ValueKey(
+                                      "blocks_${_selectedTazId ?? 'none'}_${_radius.round()}"),
+                                  title: "Blocks",
+                                  mode: MapViewMode.blocks,
+                                  drawShapes: _hasSearched,
+                                  selectedTazId: _selectedTazId,
+                                  radius: _radius,
+                                  cachedOldTaz: _cachedOldTaz,
+                                  cachedNewTaz: _cachedNewTaz,
+                                  cachedBlocks: _cachedBlocks,
+                                  blocksIndex: _blocksIndex,
+                                  selectedIds: _selectedBlockIds,
+                                  onTazSelected: (int tappedId) {
+                                    _toggleBlockRow(tappedId);
+                                  },
+                                  mapStyle: _mapStyles[_selectedMapStyleName],
+                                ),
                               ),
                             ),
                           ],
@@ -559,7 +675,8 @@ class _DashboardPageState extends State<DashboardPage> {
                 Container(
                   width: 400,
                   padding: const EdgeInsets.all(8.0),
-                  color: Colors.grey[200],
+                  // UPDATED: Set the background color to white.
+                  color: Colors.white,
                   child: Column(
                     children: [
                       const Text(
@@ -656,7 +773,7 @@ class _DashboardPageState extends State<DashboardPage> {
                                       (prev, row) =>
                                           prev + (row['emp49'] as num));
 
-                                  // Add a total row (persistent even if no selection, sums will be 0)
+                                  // Add a total row.
                                   rows.add(DataRow(
                                     color: MaterialStateProperty.all(
                                         Colors.grey[300]),
@@ -757,7 +874,6 @@ class _DashboardPageState extends State<DashboardPage> {
                                     ]));
                                   }
 
-                                  // Compute the sums as doubles
                                   double sumHH19 = _blocksTableData.fold(
                                       0.0,
                                       (prev, row) =>
@@ -799,7 +915,6 @@ class _DashboardPageState extends State<DashboardPage> {
                                           prev +
                                           (row['emp49'] as num).toDouble());
 
-                                  // Append the total row.
                                   rows.add(DataRow(
                                     color: MaterialStateProperty.all(
                                         Colors.grey[300]),
@@ -866,6 +981,8 @@ class MapView extends StatefulWidget {
   final RTree<dynamic>? blocksIndex;
   final ValueChanged<int>? onTazSelected;
   final Set<int>? selectedIds;
+  // New parameter for the map style URL.
+  final String? mapStyle;
   const MapView({
     Key? key,
     required this.title,
@@ -879,6 +996,7 @@ class MapView extends StatefulWidget {
     this.blocksIndex,
     this.onTazSelected,
     this.selectedIds,
+    this.mapStyle,
   }) : super(key: key);
   @override
   MapViewState createState() => MapViewState();
@@ -924,15 +1042,16 @@ class MapViewState extends State<MapView> {
             final tapPoint = Point<double>(
                 details.localPosition.dx, details.localPosition.dy);
             _handleMapClick(tapPoint);
-          },
+          }, // In MapViewState's build method, update initialCameraPosition:
           child: MaplibreMap(
-            // styleString: 'https://demotiles.maplibre.org/style.json',
-            styleString:
+            // Use the chosen map style.
+            styleString: widget.mapStyle ??
                 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json',
             onMapCreated: _onMapCreated,
+            // UPDATED: Center on Boston with a zoom of 12.
             initialCameraPosition: const CameraPosition(
-              target: LatLng(39.0, -75.0),
-              zoom: 7,
+              target: LatLng(42.3601, -71.0589), // Boston coordinates.
+              zoom: 12,
             ),
             onStyleLoadedCallback: _onStyleLoaded,
           ),
@@ -987,7 +1106,6 @@ class MapViewState extends State<MapView> {
         );
       } else if (widget.mode == MapViewMode.blocks) {
         await _loadBlocksFill();
-        // Add black outlines.
         await controller!.addLineLayer(
           "blocks_source",
           "blocks_outline",
@@ -1093,18 +1211,19 @@ class MapViewState extends State<MapView> {
       fillColor: "#0000FF",
       fillOpacity: 0.18,
     );
+    // Changed purple to a blue hue (#4169E1)
     await _addGeoJsonSourceAndLineLayer(
       sourceId: "old_taz_others_source",
       layerId: "old_taz_others_line",
       geojsonData: {'type': 'FeatureCollection', 'features': otherFeatures},
-      lineColor: "#800080",
+      lineColor: "#4169E1",
       lineWidth: 2.0,
     );
     await _addGeoJsonSourceAndFillLayer(
       sourceId: "old_taz_others_fill_source",
       layerId: "old_taz_others_fill",
       geojsonData: {'type': 'FeatureCollection', 'features': otherFeatures},
-      fillColor: "#800080",
+      fillColor: "#4169E1",
       fillOpacity: 0.18,
     );
     if (zoom) await _zoomToFeatureBounds(combinedData);
@@ -1243,30 +1362,25 @@ class MapViewState extends State<MapView> {
       'type': 'FeatureCollection',
       'features': filteredBlocks
     };
-// Add the blocks line layer.
     await _addGeoJsonSourceAndLineLayer(
       sourceId: "blocks_line_source",
       layerId: "blocks_line",
       geojsonData: filteredBlocksData,
-      lineColor: "#000000", // Black outline.
-      lineWidth: 1.0, // Thinner lines.
+      lineColor: "#000000",
+      lineWidth: 1.0,
     );
-
-// Add the blocks fill layer.
     await _addGeoJsonSourceAndFillLayer(
       sourceId: "blocks_fill_source",
       layerId: "blocks_fill",
       geojsonData: filteredBlocksData,
-      fillColor: "#FFA500", // Orange fill.
+      fillColor: "#FFA500",
       fillOpacity: 0.18,
     );
-
-    // Add a highlight fill layer (yellow) for selected blocks.
     await controller!.addFillLayer(
       "blocks_fill_source",
       "selected_blocks_fill",
       FillLayerProperties(
-        fillColor: "#FFFF00", // Yellow highlight.
+        fillColor: "#FFFF00",
         fillOpacity: 0.5,
       ),
       filter: (widget.selectedIds != null && widget.selectedIds!.isNotEmpty)
