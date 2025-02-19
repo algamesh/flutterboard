@@ -568,24 +568,34 @@ class _DashboardPageState extends State<DashboardPage> {
                             fontSize: 16, fontWeight: FontWeight.bold),
                       ),
                       Expanded(
-                        child: SingleChildScrollView(
-                          scrollDirection: Axis.vertical,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            border: Border.all(color: Colors.blueAccent),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
                           child: SingleChildScrollView(
-                            scrollDirection: Axis.horizontal,
-                            child: DataTable(
-                              columns: const [
-                                DataColumn(label: Text("ID")),
-                                DataColumn(label: Text("HH19")),
-                                DataColumn(label: Text("PERSNS19")),
-                                DataColumn(label: Text("WORKRS19")),
-                                DataColumn(label: Text("EMP19")),
-                                DataColumn(label: Text("HH49")),
-                                DataColumn(label: Text("PERSNS49")),
-                                DataColumn(label: Text("WORKRS49")),
-                                DataColumn(label: Text("EMP49")),
-                              ],
-                              rows: _newTazTableData.isNotEmpty
-                                  ? _newTazTableData.map((row) {
+                            scrollDirection: Axis.vertical,
+                            child: SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              child: DataTable(
+                                headingRowColor:
+                                    MaterialStateProperty.all(Colors.blue[50]),
+                                columns: const [
+                                  DataColumn(label: Text("ID")),
+                                  DataColumn(label: Text("HH19")),
+                                  DataColumn(label: Text("PERSNS19")),
+                                  DataColumn(label: Text("WORKRS19")),
+                                  DataColumn(label: Text("EMP19")),
+                                  DataColumn(label: Text("HH49")),
+                                  DataColumn(label: Text("PERSNS49")),
+                                  DataColumn(label: Text("WORKRS49")),
+                                  DataColumn(label: Text("EMP49")),
+                                ],
+                                rows: () {
+                                  // Build data rows
+                                  List<DataRow> rows = [];
+                                  if (_newTazTableData.isNotEmpty) {
+                                    rows.addAll(_newTazTableData.map((row) {
                                       return DataRow(cells: [
                                         DataCell(Text("${row['id']}")),
                                         DataCell(Text("${row['hh19']}")),
@@ -597,20 +607,92 @@ class _DashboardPageState extends State<DashboardPage> {
                                         DataCell(Text("${row['workrs49']}")),
                                         DataCell(Text("${row['emp49']}")),
                                       ]);
-                                    }).toList()
-                                  : [
-                                      const DataRow(cells: [
-                                        DataCell(Text("No data")),
-                                        DataCell(Text("")),
-                                        DataCell(Text("")),
-                                        DataCell(Text("")),
-                                        DataCell(Text("")),
-                                        DataCell(Text("")),
-                                        DataCell(Text("")),
-                                        DataCell(Text("")),
-                                        DataCell(Text("")),
-                                      ])
+                                    }).toList());
+                                  } else {
+                                    // If no data, show a single row.
+                                    rows.add(const DataRow(cells: [
+                                      DataCell(Text("No data")),
+                                      DataCell(Text("")),
+                                      DataCell(Text("")),
+                                      DataCell(Text("")),
+                                      DataCell(Text("")),
+                                      DataCell(Text("")),
+                                      DataCell(Text("")),
+                                      DataCell(Text("")),
+                                      DataCell(Text("")),
+                                    ]));
+                                  }
+                                  // Compute the sum for each column.
+                                  num sumHH19 = _newTazTableData.fold(
+                                      0,
+                                      (prev, row) =>
+                                          prev + (row['hh19'] as num));
+                                  num sumPERSNS19 = _newTazTableData.fold(
+                                      0,
+                                      (prev, row) =>
+                                          prev + (row['persns19'] as num));
+                                  num sumWORKRS19 = _newTazTableData.fold(
+                                      0,
+                                      (prev, row) =>
+                                          prev + (row['workrs19'] as num));
+                                  num sumEMP19 = _newTazTableData.fold(
+                                      0,
+                                      (prev, row) =>
+                                          prev + (row['emp19'] as num));
+                                  num sumHH49 = _newTazTableData.fold(
+                                      0,
+                                      (prev, row) =>
+                                          prev + (row['hh49'] as num));
+                                  num sumPERSNS49 = _newTazTableData.fold(
+                                      0,
+                                      (prev, row) =>
+                                          prev + (row['persns49'] as num));
+                                  num sumWORKRS49 = _newTazTableData.fold(
+                                      0,
+                                      (prev, row) =>
+                                          prev + (row['workrs49'] as num));
+                                  num sumEMP49 = _newTazTableData.fold(
+                                      0,
+                                      (prev, row) =>
+                                          prev + (row['emp49'] as num));
+
+                                  // Add a total row (persistent even if no selection, sums will be 0)
+                                  rows.add(DataRow(
+                                    color: MaterialStateProperty.all(
+                                        Colors.grey[300]),
+                                    cells: [
+                                      const DataCell(Text("Total",
+                                          style: TextStyle(
+                                              fontWeight: FontWeight.bold))),
+                                      DataCell(Text("$sumHH19",
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.bold))),
+                                      DataCell(Text("$sumPERSNS19",
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.bold))),
+                                      DataCell(Text("$sumWORKRS19",
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.bold))),
+                                      DataCell(Text("$sumEMP19",
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.bold))),
+                                      DataCell(Text("$sumHH49",
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.bold))),
+                                      DataCell(Text("$sumPERSNS49",
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.bold))),
+                                      DataCell(Text("$sumWORKRS49",
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.bold))),
+                                      DataCell(Text("$sumEMP49",
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.bold))),
                                     ],
+                                  ));
+                                  return rows;
+                                }(),
+                              ),
                             ),
                           ),
                         ),
@@ -622,24 +704,33 @@ class _DashboardPageState extends State<DashboardPage> {
                             fontSize: 16, fontWeight: FontWeight.bold),
                       ),
                       Expanded(
-                        child: SingleChildScrollView(
-                          scrollDirection: Axis.vertical,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            border: Border.all(color: Colors.orangeAccent),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
                           child: SingleChildScrollView(
-                            scrollDirection: Axis.horizontal,
-                            child: DataTable(
-                              columns: const [
-                                DataColumn(label: Text("ID")),
-                                DataColumn(label: Text("HH19")),
-                                DataColumn(label: Text("PERSNS19")),
-                                DataColumn(label: Text("WORKRS19")),
-                                DataColumn(label: Text("EMP19")),
-                                DataColumn(label: Text("HH49")),
-                                DataColumn(label: Text("PERSNS49")),
-                                DataColumn(label: Text("WORKRS49")),
-                                DataColumn(label: Text("EMP49")),
-                              ],
-                              rows: _blocksTableData.isNotEmpty
-                                  ? _blocksTableData.map((row) {
+                            scrollDirection: Axis.vertical,
+                            child: SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              child: DataTable(
+                                headingRowColor: MaterialStateProperty.all(
+                                    Colors.orange[50]),
+                                columns: const [
+                                  DataColumn(label: Text("ID")),
+                                  DataColumn(label: Text("HH19")),
+                                  DataColumn(label: Text("PERSNS19")),
+                                  DataColumn(label: Text("WORKRS19")),
+                                  DataColumn(label: Text("EMP19")),
+                                  DataColumn(label: Text("HH49")),
+                                  DataColumn(label: Text("PERSNS49")),
+                                  DataColumn(label: Text("WORKRS49")),
+                                  DataColumn(label: Text("EMP49")),
+                                ],
+                                rows: () {
+                                  List<DataRow> rows = [];
+                                  if (_blocksTableData.isNotEmpty) {
+                                    rows.addAll(_blocksTableData.map((row) {
                                       return DataRow(cells: [
                                         DataCell(Text("${row['id']}")),
                                         DataCell(Text("${row['hh19']}")),
@@ -651,20 +742,100 @@ class _DashboardPageState extends State<DashboardPage> {
                                         DataCell(Text("${row['workrs49']}")),
                                         DataCell(Text("${row['emp49']}")),
                                       ]);
-                                    }).toList()
-                                  : [
-                                      const DataRow(cells: [
-                                        DataCell(Text("No data")),
-                                        DataCell(Text("")),
-                                        DataCell(Text("")),
-                                        DataCell(Text("")),
-                                        DataCell(Text("")),
-                                        DataCell(Text("")),
-                                        DataCell(Text("")),
-                                        DataCell(Text("")),
-                                        DataCell(Text("")),
-                                      ])
+                                    }).toList());
+                                  } else {
+                                    rows.add(const DataRow(cells: [
+                                      DataCell(Text("No data")),
+                                      DataCell(Text("")),
+                                      DataCell(Text("")),
+                                      DataCell(Text("")),
+                                      DataCell(Text("")),
+                                      DataCell(Text("")),
+                                      DataCell(Text("")),
+                                      DataCell(Text("")),
+                                      DataCell(Text("")),
+                                    ]));
+                                  }
+
+                                  // Compute the sums as doubles
+                                  double sumHH19 = _blocksTableData.fold(
+                                      0.0,
+                                      (prev, row) =>
+                                          prev +
+                                          (row['hh19'] as num).toDouble());
+                                  double sumPERSNS19 = _blocksTableData.fold(
+                                      0.0,
+                                      (prev, row) =>
+                                          prev +
+                                          (row['persns19'] as num).toDouble());
+                                  double sumWORKRS19 = _blocksTableData.fold(
+                                      0.0,
+                                      (prev, row) =>
+                                          prev +
+                                          (row['workrs19'] as num).toDouble());
+                                  double sumEMP19 = _blocksTableData.fold(
+                                      0.0,
+                                      (prev, row) =>
+                                          prev +
+                                          (row['emp19'] as num).toDouble());
+                                  double sumHH49 = _blocksTableData.fold(
+                                      0.0,
+                                      (prev, row) =>
+                                          prev +
+                                          (row['hh49'] as num).toDouble());
+                                  double sumPERSNS49 = _blocksTableData.fold(
+                                      0.0,
+                                      (prev, row) =>
+                                          prev +
+                                          (row['persns49'] as num).toDouble());
+                                  double sumWORKRS49 = _blocksTableData.fold(
+                                      0.0,
+                                      (prev, row) =>
+                                          prev +
+                                          (row['workrs49'] as num).toDouble());
+                                  double sumEMP49 = _blocksTableData.fold(
+                                      0.0,
+                                      (prev, row) =>
+                                          prev +
+                                          (row['emp49'] as num).toDouble());
+
+                                  // Append the total row.
+                                  rows.add(DataRow(
+                                    color: MaterialStateProperty.all(
+                                        Colors.grey[300]),
+                                    cells: [
+                                      const DataCell(Text("Total",
+                                          style: TextStyle(
+                                              fontWeight: FontWeight.bold))),
+                                      DataCell(Text(sumHH19.toString(),
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.bold))),
+                                      DataCell(Text(sumPERSNS19.toString(),
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.bold))),
+                                      DataCell(Text(sumWORKRS19.toString(),
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.bold))),
+                                      DataCell(Text(sumEMP19.toString(),
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.bold))),
+                                      DataCell(Text(sumHH49.toString(),
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.bold))),
+                                      DataCell(Text(sumPERSNS49.toString(),
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.bold))),
+                                      DataCell(Text(sumWORKRS49.toString(),
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.bold))),
+                                      DataCell(Text(sumEMP49.toString(),
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.bold))),
                                     ],
+                                  ));
+                                  return rows;
+                                }(),
+                              ),
                             ),
                           ),
                         ),
@@ -755,6 +926,7 @@ class MapViewState extends State<MapView> {
             _handleMapClick(tapPoint);
           },
           child: MaplibreMap(
+            // styleString: 'https://demotiles.maplibre.org/style.json',
             styleString:
                 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json',
             onMapCreated: _onMapCreated,
