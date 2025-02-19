@@ -363,7 +363,7 @@ class _DashboardPageState extends State<DashboardPage> {
       child: Row(
         children: [
           const Text("Radius (m):"),
-          const SizedBox(width: 8),
+          const SizedBox(width: 5),
           Expanded(
             child: Slider(
               min: 500,
@@ -410,16 +410,16 @@ class _DashboardPageState extends State<DashboardPage> {
   Future<void> _matchZoom() async {
     // Optional: implement zoom matching.
   }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text("VizTAZ Dashboard"),
+        title: Text(_searchLabel),
+        centerTitle: true,
       ),
       body: Column(
         children: [
-          // Top control bar.
+          // Top control bar with radius control to the right of the search label.
           Padding(
             padding: const EdgeInsets.all(8.0),
             child: Row(
@@ -435,18 +435,7 @@ class _DashboardPageState extends State<DashboardPage> {
                     onSubmitted: (_) => _runSearch(),
                   ),
                 ),
-                const SizedBox(width: 8),
-                SizedBox(
-                  width: 100,
-                  child: TextField(
-                    controller: _radiusController,
-                    decoration: const InputDecoration(
-                      labelText: "Radius (m)",
-                      border: OutlineInputBorder(),
-                    ),
-                    keyboardType: TextInputType.number,
-                  ),
-                ),
+
                 const SizedBox(width: 8),
                 ElevatedButton(
                   onPressed: _runSearch,
@@ -457,15 +446,16 @@ class _DashboardPageState extends State<DashboardPage> {
                   onPressed: _matchZoom,
                   child: const Text("Match Zoom"),
                 ),
-                const SizedBox(width: 16),
-                Text(
-                  _searchLabel,
-                  style: const TextStyle(fontWeight: FontWeight.bold),
+                const SizedBox(width: 3),
+                // Automatically take the remaining space.
+                Expanded(
+                  child: _buildRadiusControl(),
                 ),
               ],
             ),
           ),
-          _buildRadiusControl(),
+
+          // _buildRadiusControl(),
           // Main content: left side maps & right side tables.
           Expanded(
             child: Row(
@@ -766,6 +756,8 @@ class MapViewState extends State<MapView> {
           },
           child: MaplibreMap(
             styleString: 'https://demotiles.maplibre.org/style.json',
+            // styleString:
+            //     'https://tile.openstreetmap.org/style.json', // Or a custom style using OSM sources,
             onMapCreated: _onMapCreated,
             initialCameraPosition: const CameraPosition(
               target: LatLng(39.0, -75.0),
