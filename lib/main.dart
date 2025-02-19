@@ -186,7 +186,7 @@ class _DashboardPageState extends State<DashboardPage> {
     'Dark Matter':
         'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
     'Satellite':
-        'https://api.maptiler.com/maps/hybrid/style.json?key=YOUR_MAPTILER_KEY',
+        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
   };
 
   @override
