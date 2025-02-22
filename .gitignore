@@ -45,4 +45,7 @@ app.*.map.json
 /android/app/release
 
 # temp exclusion of assets
-/assets/
+/assets/geojsons
+/assets/shapefiles
+/assets/esri_satellite_style.json
+web.zip
