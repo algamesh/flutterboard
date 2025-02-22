@@ -533,7 +533,7 @@ class _DashboardPageState extends State<DashboardPage> {
     return Scaffold(
       appBar: AppBar(
         backgroundColor:
-            const Color.fromARGB(255, 0, 30, 10), // Updated: darker background
+            const Color.fromARGB(255, 0, 33, 11), // Updated: darker background
         elevation: 2,
         title: Text(
           _searchLabel,
@@ -547,18 +547,18 @@ class _DashboardPageState extends State<DashboardPage> {
         actions: [
           // Conversion toggle added to the App Bar (to the left of the dropdown)
           Container(
-            height: 40, // Fixed height to match dropdown
+            height: 40,
             margin: const EdgeInsets.symmetric(horizontal: 8),
-            padding: const EdgeInsets.symmetric(horizontal: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
             decoration: BoxDecoration(
               color: Colors.white,
-              border: Border.all(color: Colors.blueAccent, width: 2),
+              border: Border.all(color: Colors.brown, width: 2),
               borderRadius: BorderRadius.circular(8),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text("Miles", style: TextStyle(color: Colors.blueAccent)),
+                Text("Miles", style: TextStyle(color: Colors.brown)),
                 Switch(
                   value: _useKilometers,
                   onChanged: (value) {
@@ -568,14 +568,12 @@ class _DashboardPageState extends State<DashboardPage> {
                           _radiusValue * (_useKilometers ? 1000 : 1609.34);
                     });
                   },
-                  // This helps keep the Switch from making the container too tall:
                   materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  // Optionally tweak switch colors here:
-                  activeColor: Colors.blueAccent,
-                  inactiveThumbColor: Colors.blueAccent,
-                  inactiveTrackColor: Colors.blueAccent.withOpacity(0.3),
+                  activeColor: Colors.brown,
+                  inactiveThumbColor: Colors.brown,
+                  inactiveTrackColor: Colors.brown.withOpacity(0.3),
                 ),
-                Text("KM", style: TextStyle(color: Colors.blueAccent)),
+                Text("KM", style: TextStyle(color: Colors.brown)),
               ],
             ),
           ),
@@ -583,10 +581,10 @@ class _DashboardPageState extends State<DashboardPage> {
           // Map style drop-down remains here.
           Container(
             margin: const EdgeInsets.symmetric(horizontal: 8),
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
             decoration: BoxDecoration(
               color: Colors.white,
-              border: Border.all(color: Colors.blueAccent, width: 2),
+              border: Border.all(color: Colors.brown, width: 2),
               borderRadius: BorderRadius.circular(8),
             ),
             child: ConstrainedBox(
@@ -594,11 +592,11 @@ class _DashboardPageState extends State<DashboardPage> {
               child: DropdownButton<String>(
                 isDense: true,
                 value: _selectedMapStyleName,
-                icon: const Icon(Icons.keyboard_arrow_down,
-                    color: Colors.blueAccent),
+                icon:
+                    const Icon(Icons.keyboard_arrow_down, color: Colors.brown),
                 dropdownColor: Colors.white,
                 style: const TextStyle(
-                    color: Colors.blueAccent, fontWeight: FontWeight.bold),
+                    color: Colors.brown, fontWeight: FontWeight.bold),
                 underline: const SizedBox(),
                 onChanged: (newValue) {
                   setState(() {
