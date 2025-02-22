@@ -170,6 +170,8 @@ class _DashboardPageState extends State<DashboardPage> {
   double _radiusValue = 1.0;
   // Toggle between using kilometers and miles.
   bool _useKilometers = false;
+  // New toggle for showing ID labels.
+  bool _showIdLabels = false;
 
   // Cached GeoJSON.
   Map<String, dynamic>? _cachedOldTaz;
@@ -545,7 +547,7 @@ class _DashboardPageState extends State<DashboardPage> {
         iconTheme:
             const IconThemeData(color: Colors.white), // Updated: white icons
         actions: [
-          // Conversion toggle added to the App Bar (to the left of the dropdown)
+          // Conversion toggle added to the App Bar.
           Container(
             height: 40,
             margin: const EdgeInsets.symmetric(horizontal: 8),
@@ -577,7 +579,35 @@ class _DashboardPageState extends State<DashboardPage> {
               ],
             ),
           ),
-
+          // New ID Labels toggle button in the App Bar.
+          Container(
+            height: 40,
+            margin: const EdgeInsets.symmetric(horizontal: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              border: Border.all(color: Colors.brown, width: 2),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text("ID Labels", style: TextStyle(color: Colors.brown)),
+                Switch(
+                  value: _showIdLabels,
+                  onChanged: (value) {
+                    setState(() {
+                      _showIdLabels = value;
+                    });
+                  },
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  activeColor: Colors.brown,
+                  inactiveThumbColor: Colors.brown,
+                  inactiveTrackColor: Colors.brown.withOpacity(0.3),
+                ),
+              ],
+            ),
+          ),
           // Map style drop-down remains here.
           Container(
             margin: const EdgeInsets.symmetric(horizontal: 8),
@@ -675,7 +705,7 @@ class _DashboardPageState extends State<DashboardPage> {
                   ),
                 ),
                 const SizedBox(width: 8),
-                // Open in Google Maps button (now with a darker orange color).
+                // Open in Google Maps button.
                 ElevatedButton(
                   onPressed: _openInGoogleMaps,
                   style: ElevatedButton.styleFrom(
@@ -728,6 +758,8 @@ class _DashboardPageState extends State<DashboardPage> {
                                   selectedTazId: _selectedTazId,
                                   radius: _radius,
                                   cachedOldTaz: _cachedOldTaz,
+                                  // Pass the new property for id labels toggle.
+                                  showIdLabels: _showIdLabels,
                                   onTazSelected: (int tappedId) {
                                     setState(() {
                                       _selectedTazId = tappedId;
@@ -772,6 +804,8 @@ class _DashboardPageState extends State<DashboardPage> {
                                   cachedOldTaz: _cachedOldTaz,
                                   cachedNewTaz: _cachedNewTaz,
                                   selectedIds: _selectedNewTazIds,
+                                  // Pass the new property for id labels toggle.
+                                  showIdLabels: _showIdLabels,
                                   onTazSelected: (int tappedId) {
                                     _toggleNewTazRow(tappedId);
                                   },
@@ -1262,6 +1296,9 @@ class MapView extends StatefulWidget {
   /// If set, whenever this map finishes moving, it calls [onCameraIdleSync] with its camera position.
   final ValueChanged<CameraPosition>? onCameraIdleSync;
 
+  // New property to toggle TAZ id labels
+  final bool showIdLabels;
+
   const MapView({
     Key? key,
     required this.title,
@@ -1278,6 +1315,7 @@ class MapView extends StatefulWidget {
     this.mapStyle,
     this.syncedCameraPosition,
     this.onCameraIdleSync,
+    this.showIdLabels = false, // default value
   }) : super(key: key);
 
   @override
@@ -1321,6 +1359,57 @@ class MapViewState extends State<MapView> {
     // If we're using sync, check if the map should move to the syncedCameraPosition.
     if (widget.syncedCameraPosition != oldWidget.syncedCameraPosition) {
       _maybeMoveToSyncedPosition();
+    }
+
+    // Handle changes in the showIdLabels toggle.
+    if (widget.showIdLabels != oldWidget.showIdLabels && controller != null) {
+      if (widget.showIdLabels) {
+        // Re-add the label layers as in _loadLayers.
+        if (widget.mode == MapViewMode.oldTaz) {
+          controller!.addSymbolLayer(
+            "old_taz_target_source",
+            "old_taz_target_labels",
+            SymbolLayerProperties(
+              textField: "{taz_id}",
+              textSize: 12,
+              textColor: "#0000FF",
+              textHaloColor: "#FFFFFF",
+              textHaloWidth: 1,
+            ),
+          );
+          controller!.addSymbolLayer(
+            "old_taz_others_source",
+            "old_taz_others_labels",
+            SymbolLayerProperties(
+              textField: "{taz_id}",
+              textSize: 12,
+              textColor: "#4169E1",
+              textHaloColor: "#FFFFFF",
+              textHaloWidth: 1,
+            ),
+          );
+        } else if (widget.mode == MapViewMode.newTaz) {
+          controller!.addSymbolLayer(
+            "new_taz_source",
+            "new_taz_labels",
+            SymbolLayerProperties(
+              textField: "{taz_id}",
+              textSize: 12,
+              textColor: "#FF0000",
+              textHaloColor: "#FFFFFF",
+              textHaloWidth: 1,
+            ),
+          );
+        }
+      } else {
+        // Remove the label layers.
+        if (widget.mode == MapViewMode.oldTaz) {
+          controller!.removeLayer("old_taz_target_labels");
+          controller!.removeLayer("old_taz_others_labels");
+        } else if (widget.mode == MapViewMode.newTaz) {
+          controller!.removeLayer("new_taz_labels");
+        }
+      }
     }
   }
 
@@ -1431,9 +1520,33 @@ class MapViewState extends State<MapView> {
       if (widget.mode == MapViewMode.oldTaz) {
         await _loadOldTazLayers();
         await _loadRadiusCircle();
+        // If the toggle is enabled, add id label layers:
+        if (widget.showIdLabels) {
+          await controller!.addSymbolLayer(
+            "old_taz_target_source",
+            "old_taz_target_labels",
+            SymbolLayerProperties(
+              textField: "{taz_id}",
+              textSize: 12,
+              textColor: "#0000FF",
+              textHaloColor: "#FFFFFF",
+              textHaloWidth: 1,
+            ),
+          );
+          await controller!.addSymbolLayer(
+            "old_taz_others_source",
+            "old_taz_others_labels",
+            SymbolLayerProperties(
+              textField: "{taz_id}",
+              textSize: 12,
+              textColor: "#4169E1",
+              textHaloColor: "#FFFFFF",
+              textHaloWidth: 1,
+            ),
+          );
+        }
       } else if (widget.mode == MapViewMode.newTaz) {
         await _loadNewTazLayers();
-        // Add layer to highlight newly selected TAZ polygons in yellow.
         await controller!.addFillLayer(
           "new_taz_source",
           "selected_new_taz_fill",
@@ -1445,6 +1558,20 @@ class MapViewState extends State<MapView> {
               ? ["in", "taz_id", ...widget.selectedIds!.toList()]
               : ["==", "taz_id", ""],
         );
+        // Add ID labels for new TAZ if enabled.
+        if (widget.showIdLabels) {
+          await controller!.addSymbolLayer(
+            "new_taz_source",
+            "new_taz_labels",
+            SymbolLayerProperties(
+              textField: "{taz_id}",
+              textSize: 12,
+              textColor: "#FF0000",
+              textHaloColor: "#FFFFFF",
+              textHaloWidth: 1,
+            ),
+          );
+        }
       } else if (widget.mode == MapViewMode.blocks) {
         await _loadBlocksFill();
         await controller!.addLineLayer(
