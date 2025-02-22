@@ -1334,19 +1334,17 @@ class MapViewState extends State<MapView> {
         );
       } else if (widget.mode == MapViewMode.blocks) {
         await _loadBlocksFill();
-        // Outline for blocks.
         await controller!.addLineLayer(
           "blocks_source",
           "blocks_outline",
           LineLayerProperties(lineColor: "#000000", lineWidth: 1.5),
         );
-        // Add layer to highlight selected block polygons in yellow.
         await controller!.addFillLayer(
-          "blocks_source",
+          "blocks_fill_source", // Use the same source as blocks fill layer.
           "selected_blocks_fill",
           FillLayerProperties(
-            fillColor: "#FFFF00",
-            fillOpacity: 0.8,
+            fillColor: "#FFFF00", // Yellow highlight.
+            fillOpacity: 0.7,
           ),
           filter: (widget.selectedIds != null && widget.selectedIds!.isNotEmpty)
               ? ["in", "geoid20", ...widget.selectedIds!.toList()]
