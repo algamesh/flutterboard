@@ -181,12 +181,37 @@ class _DashboardPageState extends State<DashboardPage> {
 
   // Background style selection for maps.
   String _selectedMapStyleName = 'Positron';
+  // 1) Make them both top-level (or static) so you can safely reference one in the other:
+  static const satelliteStyleJson = """
+{
+  "version": 8,
+  "name": "ArcGIS Satellite",
+  "sources": {
+    "satellite-source": {
+      "type": "raster",
+      "tiles": [
+        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+      ],
+      "tileSize": 256
+    }
+  },
+  "layers": [
+    {
+      "id": "satellite-layer",
+      "type": "raster",
+      "source": "satellite-source"
+    }
+  ]
+}
+""";
+
   final Map<String, String> _mapStyles = {
     'Positron': 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json',
     'Dark Matter':
         'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
-    'Satellite':
-        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+
+    // Note the data:application/json prefix:
+    'Satellite': 'data:application/json,$satelliteStyleJson',
   };
 
   @override
