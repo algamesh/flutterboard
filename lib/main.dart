@@ -328,9 +328,10 @@ class _DashboardPageState extends State<DashboardPage> {
       _searchLabel = "Currently Searching TAZ: $tazId";
       _hasSearched = true;
       _selectedTazId = tazId;
-      // Reset the data tables and selections.
-      _newTazTableData = [];
-      _blocksTableData = [];
+      // Clear the data tables:
+      _newTazTableData.clear();
+      _blocksTableData.clear();
+      // Clear the selected highlights:
       _selectedNewTazIds.clear();
       _selectedBlockIds.clear();
     });
@@ -455,6 +456,12 @@ class _DashboardPageState extends State<DashboardPage> {
                   setState(() {
                     _radius = value;
                     _radiusController.text = value.round().toString();
+                    // // Clear the data tables:
+                    // _newTazTableData.clear();
+                    // _blocksTableData.clear();
+                    // // Clear the selected highlights:
+                    // _selectedNewTazIds.clear();
+                    // _selectedBlockIds.clear();
                   });
                 },
               ),
