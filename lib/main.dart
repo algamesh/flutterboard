@@ -62,10 +62,13 @@ Map<String, dynamic> standardizeGeoJsonProperties(
           newProps.remove('taz_new1');
         }
       } else if (featureType == 'blocks') {
-        // Now using GEOID20 as the block id.
         if (newProps.containsKey('geoid20')) {
           newProps['geoid20'] = int.tryParse(newProps['geoid20'].toString()) ??
               newProps['geoid20'];
+          final String geoidStr = newProps['geoid20'].toString();
+          newProps['block_label'] = geoidStr.length > 4
+              ? geoidStr.substring(geoidStr.length - 4)
+              : geoidStr;
         }
         if (newProps.containsKey('taz_id0')) {
           newProps['taz_id'] = newProps['taz_id0'];
@@ -904,6 +907,7 @@ class _DashboardPageState extends State<DashboardPage> {
                                           });
                                         }
                                       : null,
+                                  showIdLabels: _showIdLabels,
                                 ),
                               ),
                             ),
@@ -1296,7 +1300,7 @@ class MapView extends StatefulWidget {
   /// If set, whenever this map finishes moving, it calls [onCameraIdleSync] with its camera position.
   final ValueChanged<CameraPosition>? onCameraIdleSync;
 
-  // New property to toggle TAZ id labels
+  // New property to toggle TAZ id labels (and now block id labels as well)
   final bool showIdLabels;
 
   const MapView({
@@ -1363,9 +1367,8 @@ class MapViewState extends State<MapView> {
 
     // Handle changes in the showIdLabels toggle.
     if (widget.showIdLabels != oldWidget.showIdLabels && controller != null) {
-      if (widget.showIdLabels) {
-        // Re-add the label layers as in _loadLayers.
-        if (widget.mode == MapViewMode.oldTaz) {
+      if (widget.mode == MapViewMode.oldTaz) {
+        if (widget.showIdLabels) {
           controller!.addSymbolLayer(
             "old_taz_target_source",
             "old_taz_target_labels",
@@ -1388,7 +1391,12 @@ class MapViewState extends State<MapView> {
               textHaloWidth: 1,
             ),
           );
-        } else if (widget.mode == MapViewMode.newTaz) {
+        } else {
+          controller!.removeLayer("old_taz_target_labels");
+          controller!.removeLayer("old_taz_others_labels");
+        }
+      } else if (widget.mode == MapViewMode.newTaz) {
+        if (widget.showIdLabels) {
           controller!.addSymbolLayer(
             "new_taz_source",
             "new_taz_labels",
@@ -1400,14 +1408,24 @@ class MapViewState extends State<MapView> {
               textHaloWidth: 1,
             ),
           );
-        }
-      } else {
-        // Remove the label layers.
-        if (widget.mode == MapViewMode.oldTaz) {
-          controller!.removeLayer("old_taz_target_labels");
-          controller!.removeLayer("old_taz_others_labels");
-        } else if (widget.mode == MapViewMode.newTaz) {
+        } else {
           controller!.removeLayer("new_taz_labels");
+        }
+      } else if (widget.mode == MapViewMode.blocks) {
+        if (widget.showIdLabels) {
+          controller!.addSymbolLayer(
+            "blocks_fill_source",
+            "blocks_labels",
+            SymbolLayerProperties(
+              textField: "{block_label}",
+              textSize: 12,
+              textColor: "#000000",
+              textHaloColor: "#FFFFFF",
+              textHaloWidth: 1,
+            ),
+          );
+        } else {
+          controller!.removeLayer("blocks_labels");
         }
       }
     }
@@ -1590,6 +1608,20 @@ class MapViewState extends State<MapView> {
               ? ["in", "geoid20", ...widget.selectedIds!.toList()]
               : ["==", "geoid20", ""],
         );
+        // Only add block id labels if the toggle is on.
+        if (widget.showIdLabels) {
+          await controller!.addSymbolLayer(
+            "blocks_fill_source",
+            "blocks_labels",
+            SymbolLayerProperties(
+              textField: "{block_label}",
+              textSize: 12,
+              textColor: "#000000",
+              textHaloColor: "#FFFFFF",
+              textHaloWidth: 1,
+            ),
+          );
+        }
       } else if (widget.mode == MapViewMode.combined) {
         // Loads 3 sets: blocks, old TAZ, new TAZ, plus the circle.
         final blocksData = await _loadBlocksFill(zoom: false);
