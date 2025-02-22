@@ -901,7 +901,8 @@ class _DashboardPageState extends State<DashboardPage> {
                             onPressed: _clearNewTazTable,
                             child: const Text(
                               "Clear",
-                              style: TextStyle(color: Colors.blueAccent),
+                              style: TextStyle(
+                                  color: Color.fromARGB(255, 255, 0, 0)),
                             ),
                           ),
                         ],
@@ -1068,7 +1069,8 @@ class _DashboardPageState extends State<DashboardPage> {
                             onPressed: _clearBlocksTable,
                             child: const Text(
                               "Clear",
-                              style: TextStyle(color: Colors.orangeAccent),
+                              style: TextStyle(
+                                  color: Color.fromARGB(255, 255, 0, 0)),
                             ),
                           ),
                         ],
