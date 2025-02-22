@@ -339,6 +339,22 @@ class _DashboardPageState extends State<DashboardPage> {
     });
   }
 
+  /// Clears the New TAZ table and its selections.
+  void _clearNewTazTable() {
+    setState(() {
+      _newTazTableData.clear();
+      _selectedNewTazIds.clear();
+    });
+  }
+
+  /// Clears the Blocks table and its selections.
+  void _clearBlocksTable() {
+    setState(() {
+      _blocksTableData.clear();
+      _selectedBlockIds.clear();
+    });
+  }
+
   /// Toggles a New TAZ row (and highlight on the map) for the data table on the right.
   void _toggleNewTazRow(int tappedId) {
     bool exists = _newTazTableData.any((row) => row['id'] == tappedId);
@@ -665,8 +681,7 @@ class _DashboardPageState extends State<DashboardPage> {
                 ElevatedButton(
                   onPressed: _openInGoogleMaps,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor:
-                        Colors.deepOrange, // Updated: darker orange
+                    backgroundColor: Colors.deepOrange,
                     foregroundColor: Colors.white,
                   ),
                   child: const Text("Open in Google Maps"),
@@ -873,12 +888,25 @@ class _DashboardPageState extends State<DashboardPage> {
                   color: Colors.white,
                   child: Column(
                     children: [
-                      const Text(
-                        "New TAZ Table",
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
+                      // New TAZ Table Header Row with Clear button
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            "New TAZ Table",
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: _clearNewTazTable,
+                            child: const Text(
+                              "Clear",
+                              style: TextStyle(color: Colors.blueAccent),
+                            ),
+                          ),
+                        ],
                       ),
                       Expanded(
                         child: Container(
@@ -1027,12 +1055,25 @@ class _DashboardPageState extends State<DashboardPage> {
                         ),
                       ),
                       const SizedBox(height: 16),
-                      const Text(
-                        "Blocks Table",
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
+                      // Blocks Table Header Row with Clear button
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            "Blocks Table",
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: _clearBlocksTable,
+                            child: const Text(
+                              "Clear",
+                              style: TextStyle(color: Colors.orangeAccent),
+                            ),
+                          ),
+                        ],
                       ),
                       Expanded(
                         child: Container(
