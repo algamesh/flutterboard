@@ -156,14 +156,20 @@ class DashboardPage extends StatefulWidget {
 class _DashboardPageState extends State<DashboardPage> {
   // Input controllers.
   final TextEditingController _searchController = TextEditingController();
+  // Updated radius controller starts with "1.0" (representing 1.0 mile or km)
   final TextEditingController _radiusController =
-      TextEditingController(text: "1000");
+      TextEditingController(text: "1.0");
   String _searchLabel = "Currently Searching TAZ: (none)";
   List<Map<String, dynamic>> _newTazTableData = [];
   List<Map<String, dynamic>> _blocksTableData = [];
   bool _hasSearched = false;
   int? _selectedTazId;
-  double _radius = 1000; // meters
+  // Internal radius stored in meters.
+  double _radius = 1609.34; // 1 mile in meters
+  // The slider’s value (in miles or km as per toggle).
+  double _radiusValue = 1.0;
+  // Toggle between using kilometers and miles.
+  bool _useKilometers = false;
 
   // Cached GeoJSON.
   Map<String, dynamic>? _cachedOldTaz;
@@ -207,8 +213,7 @@ class _DashboardPageState extends State<DashboardPage> {
     'Dark Matter':
         'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
     // You could also embed a Satellite style JSON if preferred.
-    'Satellite':
-        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    'Satellite': 'data:application/json,$satelliteStyleJson',
   };
 
   // Global shared camera position for synchronization.
@@ -321,9 +326,6 @@ class _DashboardPageState extends State<DashboardPage> {
       });
       return;
     }
-    final radiusInput = double.tryParse(_radiusController.text.trim());
-    _radius = radiusInput ?? 1000;
-
     setState(() {
       _searchLabel = "Currently Searching TAZ: $tazId";
       _hasSearched = true;
@@ -432,47 +434,46 @@ class _DashboardPageState extends State<DashboardPage> {
     });
   }
 
-  /// Builds the slider + text input used to set the search radius (in meters).
+  /// Builds the slider + text input used to set the search radius.
+  /// (Conversion toggle removed from here since it now appears in the App Bar.)
   Widget _buildRadiusControl() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8.0),
       child: Row(
         children: [
-          const Text("Radius (m):"),
+          Text("Radius (${_useKilometers ? 'km' : 'miles'}):"),
           const SizedBox(width: 5),
-          Expanded(
+          SizedBox(
+            width: 200, // fixed width slider so it isn’t too wide
             child: SliderTheme(
               data: SliderTheme.of(context).copyWith(
                 activeTrackColor: const Color(0xFF4169E1),
                 thumbColor: const Color(0xFF4169E1),
+                trackHeight: 4,
               ),
               child: Slider(
-                min: 500,
-                max: 5000,
-                divisions: 45,
-                label: "${_radius.round()}",
-                value: _radius,
+                min: 0.5,
+                max: 3.0,
+                divisions: 5,
+                label: _radiusValue.toStringAsFixed(1),
+                value: _radiusValue,
                 onChanged: (value) {
                   setState(() {
-                    _radius = value;
-                    _radiusController.text = value.round().toString();
-                    // // Clear the data tables:
-                    // _newTazTableData.clear();
-                    // _blocksTableData.clear();
-                    // // Clear the selected highlights:
-                    // _selectedNewTazIds.clear();
-                    // _selectedBlockIds.clear();
+                    _radiusValue = value;
+                    _radius = value * (_useKilometers ? 1000 : 1609.34);
+                    _radiusController.text = _radiusValue.toStringAsFixed(1);
                   });
                 },
               ),
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 12),
           SizedBox(
             width: 80,
             child: TextField(
               controller: _radiusController,
-              keyboardType: TextInputType.number,
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
               decoration: const InputDecoration(
                 filled: true,
                 fillColor: Colors.white,
@@ -480,12 +481,13 @@ class _DashboardPageState extends State<DashboardPage> {
               ),
               onEditingComplete: () {
                 double? newVal = double.tryParse(_radiusController.text);
-                if (newVal == null) newVal = 500;
-                if (newVal < 500) newVal = 500;
-                if (newVal > 5000) newVal = 5000;
+                if (newVal == null) newVal = 0.5;
+                if (newVal < 0.5) newVal = 0.5;
+                if (newVal > 3.0) newVal = 3.0;
                 setState(() {
-                  _radius = newVal!;
-                  _radiusController.text = newVal.round().toString();
+                  _radiusValue = newVal!;
+                  _radius = _radiusValue * (_useKilometers ? 1000 : 1609.34);
+                  _radiusController.text = _radiusValue.toStringAsFixed(1);
                 });
               },
             ),
@@ -497,52 +499,103 @@ class _DashboardPageState extends State<DashboardPage> {
 
   /// Opens Google Maps centered on the current synced camera target.
   void _openInGoogleMaps() {
+    double lat, lng;
     if (_syncedCameraPosition != null) {
-      final lat = _syncedCameraPosition!.target.latitude;
-      final lng = _syncedCameraPosition!.target.longitude;
-      final url = "https://www.google.com/maps/search/?api=1&query=$lat,$lng";
-      html.window.open(url, '_blank');
+      lat = _syncedCameraPosition!.target.latitude;
+      lng = _syncedCameraPosition!.target.longitude;
     } else {
-      debugPrint("No synced camera position available to open in Google Maps.");
+      // Fallback default coordinate (Boston)
+      lat = 42.3601;
+      lng = -71.0589;
     }
+    final url = "https://www.google.com/maps/search/?api=1&query=$lat,$lng";
+    html.window.open(url, '_blank');
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: const Color.fromARGB(255, 219, 243, 255),
-        title: Text(_searchLabel),
+        backgroundColor:
+            const Color.fromARGB(255, 0, 30, 10), // Updated: darker background
+        elevation: 2,
+        title: Text(
+          _searchLabel,
+          style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold), // Updated: white text
+        ),
         centerTitle: true,
+        iconTheme:
+            const IconThemeData(color: Colors.white), // Updated: white icons
         actions: [
+          // Conversion toggle added to the App Bar (to the left of the dropdown)
+          Container(
+            height: 40, // Fixed height to match dropdown
+            margin: const EdgeInsets.symmetric(horizontal: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              border: Border.all(color: Colors.blueAccent, width: 2),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text("Miles", style: TextStyle(color: Colors.blueAccent)),
+                Switch(
+                  value: _useKilometers,
+                  onChanged: (value) {
+                    setState(() {
+                      _useKilometers = value;
+                      _radius =
+                          _radiusValue * (_useKilometers ? 1000 : 1609.34);
+                    });
+                  },
+                  // This helps keep the Switch from making the container too tall:
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  // Optionally tweak switch colors here:
+                  activeColor: Colors.blueAccent,
+                  inactiveThumbColor: Colors.blueAccent,
+                  inactiveTrackColor: Colors.blueAccent.withOpacity(0.3),
+                ),
+                Text("KM", style: TextStyle(color: Colors.blueAccent)),
+              ],
+            ),
+          ),
+
+          // Map style drop-down remains here.
           Container(
             margin: const EdgeInsets.symmetric(horizontal: 8),
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             decoration: BoxDecoration(
-              color:
-                  Colors.white, // A white background to contrast the app bar.
+              color: Colors.white,
               border: Border.all(color: Colors.blueAccent, width: 2),
               borderRadius: BorderRadius.circular(8),
             ),
-            child: DropdownButton<String>(
-              value: _selectedMapStyleName,
-              icon: const Icon(Icons.keyboard_arrow_down,
-                  color: Colors.blueAccent),
-              dropdownColor: Colors.white,
-              style: const TextStyle(
-                  color: Colors.blueAccent, fontWeight: FontWeight.bold),
-              underline: const SizedBox(),
-              onChanged: (newValue) {
-                setState(() {
-                  _selectedMapStyleName = newValue!;
-                });
-              },
-              items: _mapStyles.keys.map((styleName) {
-                return DropdownMenuItem<String>(
-                  value: styleName,
-                  child: Text(styleName),
-                );
-              }).toList(),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 80),
+              child: DropdownButton<String>(
+                isDense: true,
+                value: _selectedMapStyleName,
+                icon: const Icon(Icons.keyboard_arrow_down,
+                    color: Colors.blueAccent),
+                dropdownColor: Colors.white,
+                style: const TextStyle(
+                    color: Colors.blueAccent, fontWeight: FontWeight.bold),
+                underline: const SizedBox(),
+                onChanged: (newValue) {
+                  setState(() {
+                    _selectedMapStyleName = newValue!;
+                  });
+                },
+                items: _mapStyles.keys.map((styleName) {
+                  return DropdownMenuItem<String>(
+                    value: styleName,
+                    child: Text(styleName),
+                  );
+                }).toList(),
+              ),
             ),
           ),
         ],
@@ -572,6 +625,10 @@ class _DashboardPageState extends State<DashboardPage> {
                 // Search TAZ button.
                 ElevatedButton(
                   onPressed: _runSearch,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue[900],
+                    foregroundColor: Colors.white,
+                  ),
                   child: const Text("Search TAZ"),
                 ),
                 const SizedBox(width: 8),
@@ -588,15 +645,15 @@ class _DashboardPageState extends State<DashboardPage> {
                     setState(() {
                       _isSyncEnabled = !_isSyncEnabled;
                       if (!_isSyncEnabled) {
-                        // If turning sync OFF, we clear the synced position.
+                        // If turning sync OFF, clear the synced position.
                         _syncedCameraPosition = null;
                       }
                     });
                   },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: _isSyncEnabled
-                        ? const Color(0xFF8B0000) // Dark red if ON
-                        : const Color(0xFF006400), // Dark green if OFF
+                        ? const Color(0xFF8B0000)
+                        : const Color(0xFF006400),
                   ),
                   child: Text(
                     _isSyncEnabled ? "View Sync ON" : "View Sync OFF",
@@ -604,14 +661,26 @@ class _DashboardPageState extends State<DashboardPage> {
                   ),
                 ),
                 const SizedBox(width: 8),
-                // Open in Google Maps button.
+                // Open in Google Maps button (now with a darker orange color).
                 ElevatedButton(
                   onPressed: _openInGoogleMaps,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor:
+                        Colors.deepOrange, // Updated: darker orange
+                    foregroundColor: Colors.white,
+                  ),
                   child: const Text("Open in Google Maps"),
                 ),
                 const SizedBox(width: 8),
+                // Additional vertical divider.
+                Container(
+                  height: 40,
+                  width: 1,
+                  color: Colors.grey,
+                ),
+                const SizedBox(width: 12),
                 // Radius slider & text input.
-                Expanded(child: _buildRadiusControl()),
+                _buildRadiusControl(),
               ],
             ),
           ),
@@ -640,7 +709,6 @@ class _DashboardPageState extends State<DashboardPage> {
                                 child: MapView(
                                   key: ValueKey(
                                       "old_${_selectedTazId ?? 'none'}_${_radius.round()}"),
-
                                   title: "Old TAZ (Blue target, Blue others)",
                                   mode: MapViewMode.oldTaz,
                                   drawShapes: _hasSearched,
@@ -683,7 +751,6 @@ class _DashboardPageState extends State<DashboardPage> {
                                 child: MapView(
                                   key: ValueKey(
                                       "new_${_selectedTazId ?? 'none'}_${_radius.round()}"),
-
                                   title: "New TAZ (Red Outline)",
                                   mode: MapViewMode.newTaz,
                                   drawShapes: _hasSearched,
@@ -729,7 +796,6 @@ class _DashboardPageState extends State<DashboardPage> {
                                 child: MapView(
                                   key: ValueKey(
                                       "combined_${_selectedTazId ?? 'none'}_${_radius.round()}"),
-
                                   title: "Combined View",
                                   mode: MapViewMode.combined,
                                   drawShapes: _hasSearched,
@@ -766,7 +832,6 @@ class _DashboardPageState extends State<DashboardPage> {
                                 child: MapView(
                                   key: ValueKey(
                                       "blocks_${_selectedTazId ?? 'none'}_${_radius.round()}"),
-
                                   title: "Blocks",
                                   mode: MapViewMode.blocks,
                                   drawShapes: _hasSearched,
@@ -1347,10 +1412,10 @@ class MapViewState extends State<MapView> {
           LineLayerProperties(lineColor: "#000000", lineWidth: 1.5),
         );
         await controller!.addFillLayer(
-          "blocks_fill_source", // Use the same source as blocks fill layer.
+          "blocks_fill_source",
           "selected_blocks_fill",
           FillLayerProperties(
-            fillColor: "#FFFF00", // Yellow highlight.
+            fillColor: "#FFFF00",
             fillOpacity: 0.7,
           ),
           filter: (widget.selectedIds != null && widget.selectedIds!.isNotEmpty)
