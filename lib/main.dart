@@ -524,11 +524,27 @@ class _DashboardPageState extends State<DashboardPage> {
   /// Opens Google Maps centered on the current synced camera target.
   void _openInGoogleMaps() {
     double lat, lng;
-    if (_syncedCameraPosition != null) {
-      lat = _syncedCameraPosition!.target.latitude;
-      lng = _syncedCameraPosition!.target.longitude;
+    if (_selectedTazId != null && _cachedOldTaz != null) {
+      final features = _cachedOldTaz!['features'] as List<dynamic>;
+      final targetFeature = features.firstWhere(
+        (f) =>
+            (f['properties'] as Map<String, dynamic>)['taz_id'].toString() ==
+            _selectedTazId.toString(),
+        orElse: () => null,
+      );
+      if (targetFeature != null) {
+        final turf.Feature targetTazFeature =
+            turf.Feature.fromJson(targetFeature);
+        final centroidFeature = turf.centroid(targetTazFeature);
+        final turf.Point targetCentroid =
+            centroidFeature.geometry as turf.Point;
+        lat = (targetCentroid.coordinates[1] as num).toDouble();
+        lng = (targetCentroid.coordinates[0] as num).toDouble();
+      } else {
+        lat = 42.3601;
+        lng = -71.0589;
+      }
     } else {
-      // Fallback default coordinate (Boston)
       lat = 42.3601;
       lng = -71.0589;
     }
@@ -1725,14 +1741,14 @@ class MapViewState extends State<MapView> {
       sourceId: "old_taz_target_source",
       layerId: "old_taz_target_line",
       geojsonData: {'type': 'FeatureCollection', 'features': targetFeatures},
-      lineColor: "#0000FF",
+      lineColor: "#ff8000",
       lineWidth: 2.0,
     );
     await _addGeoJsonSourceAndFillLayer(
       sourceId: "old_taz_target_fill_source",
       layerId: "old_taz_target_fill",
       geojsonData: {'type': 'FeatureCollection', 'features': targetFeatures},
-      fillColor: "#0000FF",
+      fillColor: "#ff8000",
       fillOpacity: 0.18,
     );
 
