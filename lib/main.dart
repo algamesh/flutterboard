@@ -1565,6 +1565,14 @@ class MapViewState extends State<MapView> {
         }
       } else if (widget.mode == MapViewMode.newTaz) {
         await _loadNewTazLayers();
+        // await _loadBlocksFill();
+
+        // await controller!.addLineLayer(
+        //   "blocks_source",
+        //   "blocks_outline",
+        //   LineLayerProperties(lineColor: "#000000", lineWidth: 1.5),
+        // );
+        await _loadRadiusCircle();
         await controller!.addFillLayer(
           "new_taz_source",
           "selected_new_taz_fill",
@@ -1592,6 +1600,7 @@ class MapViewState extends State<MapView> {
         }
       } else if (widget.mode == MapViewMode.blocks) {
         await _loadBlocksFill();
+        await _loadRadiusCircle();
         await controller!.addLineLayer(
           "blocks_source",
           "blocks_outline",
@@ -1946,14 +1955,14 @@ class MapViewState extends State<MapView> {
       "radius_circle_fill",
       FillLayerProperties(
         fillColor: "#0000FF",
-        fillOpacity: 0.1,
+        fillOpacity: 0,
       ),
     );
     await controller!.addLineLayer(
       "radius_circle_source",
       "radius_circle_line",
       LineLayerProperties(
-        lineColor: "#0000FF",
+        lineColor: "#FF8C00",
         lineWidth: 2.0,
       ),
     );
