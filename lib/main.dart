@@ -764,6 +764,9 @@ class _DashboardPageState extends State<DashboardPage> {
                                   selectedTazId: _selectedTazId,
                                   radius: _radius,
                                   cachedOldTaz: _cachedOldTaz,
+                                  // Pass cached blocks and index so _loadBlocksFill works here.
+                                  cachedBlocks: _cachedBlocks,
+                                  blocksIndex: _blocksIndex,
                                   // Pass the new property for id labels toggle.
                                   showIdLabels: _showIdLabels,
                                   onTazSelected: (int tappedId) {
@@ -809,6 +812,9 @@ class _DashboardPageState extends State<DashboardPage> {
                                   radius: _radius,
                                   cachedOldTaz: _cachedOldTaz,
                                   cachedNewTaz: _cachedNewTaz,
+                                  // Also pass cached blocks and index.
+                                  cachedBlocks: _cachedBlocks,
+                                  blocksIndex: _blocksIndex,
                                   selectedIds: _selectedNewTazIds,
                                   // Pass the new property for id labels toggle.
                                   showIdLabels: _showIdLabels,
@@ -1541,6 +1547,8 @@ class MapViewState extends State<MapView> {
       if (widget.mode == MapViewMode.oldTaz) {
         await _loadOldTazLayers();
         await _loadRadiusCircle();
+        // Replace drawing all blocks with a filtered set of blocks (without auto-zoom).
+        await _loadBlocksFill();
         // If the toggle is enabled, add id label layers:
         if (widget.showIdLabels) {
           await controller!.addSymbolLayer(
@@ -1569,6 +1577,8 @@ class MapViewState extends State<MapView> {
       } else if (widget.mode == MapViewMode.newTaz) {
         await _loadNewTazLayers();
         await _loadRadiusCircle();
+        // Use the filtered blocks here as well.
+        await _loadBlocksFill();
         await controller!.addFillLayer(
           "new_taz_source",
           "selected_new_taz_fill",
@@ -1580,7 +1590,6 @@ class MapViewState extends State<MapView> {
               ? ["in", "taz_id", ...widget.selectedIds!.toList()]
               : ["==", "taz_id", ""],
         );
-        // Add ID labels for new TAZ if enabled.
         if (widget.showIdLabels) {
           await controller!.addSymbolLayer(
             "new_taz_source",
@@ -1814,6 +1823,44 @@ class MapViewState extends State<MapView> {
     return filteredNewData;
   }
 
+  /// Draw all blocks from the cached GeoJSON with a black outline and orange fill.
+  /// Does NOT do any distance filtering or centroid checks.
+  Future<void> _drawAllBlocksSimple() async {
+    if (controller == null || widget.cachedBlocks == null) return;
+
+    // Use your cached blocks data directly:
+    final blocksData = widget.cachedBlocks!;
+
+    // Add a single source for the blocks
+    await controller!.addSource(
+      "blocks_source",
+      GeojsonSourceProperties(data: blocksData),
+    );
+
+    // Add an outline layer
+    await controller!.addLineLayer(
+      "blocks_source",
+      "blocks_outline",
+      LineLayerProperties(
+        lineColor: "#000000",
+        lineWidth: 1.0,
+      ),
+    );
+
+    // Add a fill layer
+    await controller!.addFillLayer(
+      "blocks_source",
+      "blocks_fill",
+      FillLayerProperties(
+        fillColor: "#FFA500",
+        fillOpacity: 0.18,
+      ),
+    );
+
+    // Optionally zoom to all of the blocks if you want:
+    await _zoomToFeatureBounds(blocksData);
+  }
+
   /// Loads the block polygons within the search radius.
   Future<Map<String, dynamic>?> _loadBlocksFill({bool zoom = true}) async {
     if (controller == null ||
@@ -1838,7 +1885,7 @@ class MapViewState extends State<MapView> {
     final turf.Point oldCentroid = oldCentroidFeature.geometry as turf.Point;
     double radiusKm = widget.radius! / 1000;
 
-    // Approx bounding box
+    // Calculate a bounding box around the old TAZ centroid.
     final double centerLat = (oldCentroid.coordinates[1]!).toDouble();
     final double centerLng = (oldCentroid.coordinates[0]!).toDouble();
     final double deltaLat = radiusKm / 110.574;
@@ -1851,7 +1898,7 @@ class MapViewState extends State<MapView> {
       2 * deltaLat,
     );
 
-    // Use R-Tree for quick prefilter
+    // Use R-Tree for quick prefilter.
     List<dynamic> candidateBlocks = [];
     if (widget.blocksIndex != null) {
       math.Rectangle<num> searchRect = math.Rectangle<num>(
@@ -1872,14 +1919,14 @@ class MapViewState extends State<MapView> {
           blockCentroidFeature.geometry as turf.Point;
       final double blockLng = (blockCentroid.coordinates[0]!).toDouble();
       final double blockLat = (blockCentroid.coordinates[1]!).toDouble();
-      // Quick bounding box check
+      // Quick bounding box check.
       if (blockLng < circleBBox.left ||
           blockLng > circleBBox.left + circleBBox.width ||
           blockLat < circleBBox.top ||
           blockLat > circleBBox.top + circleBBox.height) {
         return false;
       }
-      // More precise distance check
+      // More precise distance check.
       double distance = (turf.distance(
               oldCentroid, blockCentroid, turf.Unit.kilometers) as num)
           .toDouble();
@@ -1895,22 +1942,24 @@ class MapViewState extends State<MapView> {
       'features': filteredBlocks
     };
 
-    // Basic block fill & line
-    await _addGeoJsonSourceAndLineLayer(
-      sourceId: "blocks_line_source",
-      layerId: "blocks_line",
-      geojsonData: filteredBlocksData,
-      lineColor: "#000000",
-      lineWidth: 1.0,
-    );
+    // Set a lower opacity (more transparent) when in old/new TAZ modes.
+    double fillOpacity = widget.mode == MapViewMode.blocks ? 0.18 : 0.05;
+
     await _addGeoJsonSourceAndFillLayer(
       sourceId: "blocks_fill_source",
       layerId: "blocks_fill",
       geojsonData: filteredBlocksData,
       fillColor: "#FFA500",
-      fillOpacity: 0.18,
+      fillOpacity: fillOpacity,
     );
-    // We'll add "selected_blocks_fill" later in _loadLayers for highlighting.
+    // The outline remains unchanged.
+    await _addGeoJsonSourceAndLineLayer(
+      sourceId: "blocks_line_source",
+      layerId: "blocks_line",
+      geojsonData: filteredBlocksData,
+      lineColor: "#000000",
+      lineWidth: 0.4,
+    );
 
     if (zoom) await _zoomToFeatureBounds(filteredBlocksData);
     return filteredBlocksData;
@@ -1990,7 +2039,7 @@ class MapViewState extends State<MapView> {
     required String layerId,
     required Map<String, dynamic> geojsonData,
     required String fillColor,
-    double fillOpacity = 0.18,
+    double fillOpacity = 0.08,
   }) async {
     await controller!
         .addSource(sourceId, GeojsonSourceProperties(data: geojsonData));
