@@ -1541,9 +1541,9 @@ class MapViewState extends State<MapView> {
 
   /// Called when the style is fully loaded (including sources).
   Future<void> _onStyleLoaded() async {
-    if (widget.drawShapes && !_hasLoadedLayers) {
-      await _loadLayers();
-    }
+    // Reset the flag so that custom layers are always reloaded.
+    _hasLoadedLayers = false;
+    await _loadLayers();
   }
 
   /// Moves this map to the globally synced camera position (if any).
