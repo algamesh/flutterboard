@@ -235,6 +235,9 @@ class _DashboardPageState extends State<DashboardPage> {
   @override
   void initState() {
     super.initState();
+    // Initialize with TAZ 12 searched.
+    _searchController.text = "12";
+    _runSearch();
     _loadCachedData();
   }
 
@@ -536,34 +539,33 @@ class _DashboardPageState extends State<DashboardPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      // Set the AppBar background to a very dark green.
       appBar: AppBar(
         backgroundColor:
-            const Color.fromARGB(255, 0, 33, 11), // Updated: darker background
+            const Color(0xFF013220), // Very dark green for the AppBar.
         elevation: 2,
         title: Text(
           _searchLabel,
-          style: const TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.bold), // Updated: white text
+          style:
+              const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
         centerTitle: true,
-        iconTheme:
-            const IconThemeData(color: Colors.white), // Updated: white icons
+        iconTheme: const IconThemeData(color: Colors.white),
         actions: [
-          // Conversion toggle added to the App Bar.
+          // Conversion toggle with white background and very dark brown boundaries/text.
           Container(
             height: 40,
             margin: const EdgeInsets.symmetric(horizontal: 8),
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
             decoration: BoxDecoration(
               color: Colors.white,
-              border: Border.all(color: Colors.brown, width: 2),
+              border: Border.all(color: const Color(0xFF3E2723), width: 2),
               borderRadius: BorderRadius.circular(8),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text("Miles", style: TextStyle(color: Colors.brown)),
+                Text("Miles", style: TextStyle(color: const Color(0xFF3E2723))),
                 Switch(
                   value: _useKilometers,
                   onChanged: (value) {
@@ -574,28 +576,29 @@ class _DashboardPageState extends State<DashboardPage> {
                     });
                   },
                   materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  activeColor: Colors.brown,
-                  inactiveThumbColor: Colors.brown,
-                  inactiveTrackColor: Colors.brown.withOpacity(0.3),
+                  activeColor: const Color(0xFF3E2723),
+                  inactiveThumbColor: const Color(0xFF3E2723),
+                  inactiveTrackColor: const Color(0xFF3E2723).withOpacity(0.3),
                 ),
-                Text("KM", style: TextStyle(color: Colors.brown)),
+                Text("KM", style: TextStyle(color: const Color(0xFF3E2723))),
               ],
             ),
           ),
-          // New ID Labels toggle button in the App Bar.
+          // ID Labels toggle with same white background and very dark brown styling.
           Container(
             height: 40,
             margin: const EdgeInsets.symmetric(horizontal: 8),
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
             decoration: BoxDecoration(
               color: Colors.white,
-              border: Border.all(color: Colors.brown, width: 2),
+              border: Border.all(color: const Color(0xFF3E2723), width: 2),
               borderRadius: BorderRadius.circular(8),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text("ID Labels", style: TextStyle(color: Colors.brown)),
+                Text("ID Labels",
+                    style: TextStyle(color: const Color(0xFF3E2723))),
                 Switch(
                   value: _showIdLabels,
                   onChanged: (value) {
@@ -604,20 +607,20 @@ class _DashboardPageState extends State<DashboardPage> {
                     });
                   },
                   materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  activeColor: Colors.brown,
-                  inactiveThumbColor: Colors.brown,
-                  inactiveTrackColor: Colors.brown.withOpacity(0.3),
+                  activeColor: const Color(0xFF3E2723),
+                  inactiveThumbColor: const Color(0xFF3E2723),
+                  inactiveTrackColor: const Color(0xFF3E2723).withOpacity(0.3),
                 ),
               ],
             ),
           ),
-          // Map style drop-down remains here.
+          // Map style drop-down with white background, very dark brown border and green text.
           Container(
             margin: const EdgeInsets.symmetric(horizontal: 8),
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
             decoration: BoxDecoration(
               color: Colors.white,
-              border: Border.all(color: Colors.brown, width: 2),
+              border: Border.all(color: const Color(0xFF3E2723), width: 2),
               borderRadius: BorderRadius.circular(8),
             ),
             child: ConstrainedBox(
@@ -625,11 +628,11 @@ class _DashboardPageState extends State<DashboardPage> {
               child: DropdownButton<String>(
                 isDense: true,
                 value: _selectedMapStyleName,
-                icon:
-                    const Icon(Icons.keyboard_arrow_down, color: Colors.brown),
+                icon: const Icon(Icons.keyboard_arrow_down,
+                    color: const Color(0xFF3E2723)),
                 dropdownColor: Colors.white,
                 style: const TextStyle(
-                    color: Colors.brown, fontWeight: FontWeight.bold),
+                    color: Color(0xFF3E2723), fontWeight: FontWeight.bold),
                 underline: const SizedBox(),
                 onChanged: (newValue) {
                   setState(() {
@@ -1565,13 +1568,6 @@ class MapViewState extends State<MapView> {
         }
       } else if (widget.mode == MapViewMode.newTaz) {
         await _loadNewTazLayers();
-        // await _loadBlocksFill();
-
-        // await controller!.addLineLayer(
-        //   "blocks_source",
-        //   "blocks_outline",
-        //   LineLayerProperties(lineColor: "#000000", lineWidth: 1.5),
-        // );
         await _loadRadiusCircle();
         await controller!.addFillLayer(
           "new_taz_source",
