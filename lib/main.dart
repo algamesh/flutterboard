@@ -9,6 +9,7 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:maplibre_gl/maplibre_gl.dart';
 import 'package:turf/turf.dart' as turf;
 import 'package:r_tree/r_tree.dart';
+import 'package:alga_configui/src/config_page.dart';
 
 /// Helper: Generate a GeoJSON polygon approximating a circle.
 Map<String, dynamic> createCirclePolygon(turf.Point center, double radius,
@@ -552,6 +553,14 @@ class _DashboardPageState extends State<DashboardPage> {
     html.window.open(url, '_blank');
   }
 
+  /// Navigates to the configuration page.
+  void _goToConfigPage(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const ConfigPage()),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -565,6 +574,7 @@ class _DashboardPageState extends State<DashboardPage> {
           style:
               const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
+
         centerTitle: true,
         iconTheme: const IconThemeData(color: Colors.white),
         actions: [
@@ -662,6 +672,18 @@ class _DashboardPageState extends State<DashboardPage> {
                   );
                 }).toList(),
               ),
+            ),
+          ),
+
+          Container(
+            margin: const EdgeInsets.only(right: 16.0),
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+              color: Colors.white,
+            ),
+            child: IconButton(
+              icon: const Icon(Icons.settings, color: Colors.blue),
+              onPressed: () => _goToConfigPage(context),
             ),
           ),
         ],
