@@ -13,7 +13,7 @@ dependencies:
   # flutter_geokit: ^0.1.5
   turf: ^0.0.10
   r_tree: ^3.0.1
-  alga_configui: ^0.0.3+2
+  alga_configui: ^0.0.4
 
 dev_dependencies:
   flutter_test:

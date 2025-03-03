@@ -5,10 +5,10 @@ packages:
     dependency: "direct main"
     description:
       name: alga_configui
-      sha256: b7f0dcc3c4b6fe92af000ba351459978a441e4ab44fd04c66cfa0a8e2af885d9
+      sha256: "9470ae1c1f979012a90807b9338059a3f210812f68034270f96ee001df4ac4b2"
       url: "https://pub.dev"
     source: hosted
-    version: "0.0.3+2"
+    version: "0.0.4"
   archive:
     dependency: transitive
     description:
@@ -85,10 +85,10 @@ packages:
     dependency: transitive
     description:
       name: dart_datakit
-      sha256: da08b27b16bea5938b08ae90a3aa49993606d8d54cec5f87bc5a7920cbfe372c
+      sha256: "1c64044a495c078cd3f88a2079bae1542685ac3057f2eb4da13cebb74ae1321d"
       url: "https://pub.dev"
     source: hosted
-    version: "1.1.4"
+    version: "1.2.0"
   dart_sort_queue:
     dependency: transitive
     description:

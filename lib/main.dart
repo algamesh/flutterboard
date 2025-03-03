@@ -158,6 +158,9 @@ class DashboardPage extends StatefulWidget {
 }
 
 class _DashboardPageState extends State<DashboardPage> {
+
+  bool _isLoading = true;
+
   // Input controllers.
   final TextEditingController _searchController = TextEditingController();
   // Updated radius controller starts with "1.0" (representing 1.0 mile or km)
@@ -236,10 +239,14 @@ class _DashboardPageState extends State<DashboardPage> {
   @override
   void initState() {
     super.initState();
-    // Initialize with TAZ 12 searched.
-    _searchController.text = "12";
-    _runSearch();
-    _loadCachedData();
+    // // Initialize with TAZ 12 searched.
+    // _searchController.text = "12";
+    // _runSearch();
+    _loadCachedData().then((_) {
+      setState(() {
+        _isLoading = false;
+      });
+    });
   }
 
   /// Load and preprocess all GeoJSON, plus build spatial index for blocks.
@@ -376,13 +383,13 @@ class _DashboardPageState extends State<DashboardPage> {
       Map<String, dynamic> newRow = {
         'id': tappedId,
         'hh19': 0,
-        'persns19': 0,
-        'workrs19': 0,
-        'emp19': 0,
         'hh49': 0,
-        'persns49': 0,
-        'workrs49': 0,
+        'emp19': 0,
         'emp49': 0,
+        'persns19': 0,
+        'persns49': 0,
+        'workrs19': 0,
+        'workrs49': 0,
       };
       if (_cachedNewTaz != null && _cachedNewTaz!['features'] != null) {
         List<dynamic> features = _cachedNewTaz!['features'];
@@ -395,13 +402,13 @@ class _DashboardPageState extends State<DashboardPage> {
           newRow = {
             'id': tappedId,
             'hh19': props['hh19'] ?? 0,
-            'persns19': props['persns19'] ?? 0,
-            'workrs19': props['workrs19'] ?? 0,
-            'emp19': props['emp19'] ?? 0,
             'hh49': props['hh49'] ?? 0,
-            'persns49': props['persns49'] ?? 0,
-            'workrs49': props['workrs49'] ?? 0,
+            'emp19': props['emp19'] ?? 0,
             'emp49': props['emp49'] ?? 0,
+            'persns19': props['persns19'] ?? 0,
+            'persns49': props['persns49'] ?? 0,
+            'workrs19': props['workrs19'] ?? 0,
+            'workrs49': props['workrs49'] ?? 0,
           };
         }
       }
@@ -423,13 +430,13 @@ class _DashboardPageState extends State<DashboardPage> {
         Map<String, dynamic> newRow = {
           'id': tappedId,
           'hh19': 0,
-          'persns19': 0,
-          'workrs19': 0,
-          'emp19': 0,
           'hh49': 0,
-          'persns49': 0,
-          'workrs49': 0,
+          'emp19': 0,
           'emp49': 0,
+          'persns19': 0,
+          'persns49': 0,
+          'workrs19': 0,
+          'workrs49': 0,
         };
         if (_cachedBlocks != null && _cachedBlocks!['features'] != null) {
           List<dynamic> features = _cachedBlocks!['features'];
@@ -443,13 +450,13 @@ class _DashboardPageState extends State<DashboardPage> {
             newRow = {
               'id': tappedId,
               'hh19': props['hh19'] ?? 0,
-              'persns19': props['persns19'] ?? 0,
-              'workrs19': props['workrs19'] ?? 0,
-              'emp19': props['emp19'] ?? 0,
               'hh49': props['hh49'] ?? 0,
-              'persns49': props['persns49'] ?? 0,
-              'workrs49': props['workrs49'] ?? 0,
+              'emp19': props['emp19'] ?? 0,
               'emp49': props['emp49'] ?? 0,
+              'persns19': props['persns19'] ?? 0,
+              'persns49': props['persns49'] ?? 0,
+              'workrs19': props['workrs19'] ?? 0,
+              'workrs49': props['workrs49'] ?? 0,
             };
           }
         }
@@ -563,6 +570,14 @@ class _DashboardPageState extends State<DashboardPage> {
 
   @override
   Widget build(BuildContext context) {
+    
+    if (_isLoading) {
+      return Scaffold(
+        appBar: AppBar(title: const Text("VizTAZ Dashboard")),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
     return Scaffold(
       // Set the AppBar background to a very dark green.
       appBar: AppBar(
@@ -1008,13 +1023,13 @@ class _DashboardPageState extends State<DashboardPage> {
                                 columns: const [
                                   DataColumn(label: Text("ID")),
                                   DataColumn(label: Text("HH19")),
-                                  DataColumn(label: Text("PERSNS19")),
-                                  DataColumn(label: Text("WORKRS19")),
-                                  DataColumn(label: Text("EMP19")),
                                   DataColumn(label: Text("HH49")),
-                                  DataColumn(label: Text("PERSNS49")),
-                                  DataColumn(label: Text("WORKRS49")),
+                                  DataColumn(label: Text("EMP19")),
                                   DataColumn(label: Text("EMP49")),
+                                  DataColumn(label: Text("PERSNS19")),
+                                  DataColumn(label: Text("PERSNS49")),
+                                  DataColumn(label: Text("WORKRS19")),
+                                  DataColumn(label: Text("WORKRS49")),
                                 ],
                                 rows: () {
                                   List<DataRow> rows = [];
@@ -1023,13 +1038,13 @@ class _DashboardPageState extends State<DashboardPage> {
                                       return DataRow(cells: [
                                         DataCell(Text("${row['id']}")),
                                         DataCell(Text("${row['hh19']}")),
-                                        DataCell(Text("${row['persns19']}")),
-                                        DataCell(Text("${row['workrs19']}")),
-                                        DataCell(Text("${row['emp19']}")),
                                         DataCell(Text("${row['hh49']}")),
-                                        DataCell(Text("${row['persns49']}")),
-                                        DataCell(Text("${row['workrs49']}")),
+                                        DataCell(Text("${row['emp19']}")),
                                         DataCell(Text("${row['emp49']}")),
+                                        DataCell(Text("${row['persns19']}")),
+                                        DataCell(Text("${row['persns49']}")),
+                                        DataCell(Text("${row['workrs19']}")),
+                                        DataCell(Text("${row['workrs49']}")),
                                       ]);
                                     }).toList());
                                   } else {
@@ -1176,13 +1191,13 @@ class _DashboardPageState extends State<DashboardPage> {
                                 columns: const [
                                   DataColumn(label: Text("ID")),
                                   DataColumn(label: Text("HH19")),
-                                  DataColumn(label: Text("PERSNS19")),
-                                  DataColumn(label: Text("WORKRS19")),
-                                  DataColumn(label: Text("EMP19")),
                                   DataColumn(label: Text("HH49")),
-                                  DataColumn(label: Text("PERSNS49")),
-                                  DataColumn(label: Text("WORKRS49")),
+                                  DataColumn(label: Text("EMP19")),
                                   DataColumn(label: Text("EMP49")),
+                                  DataColumn(label: Text("PERSNS19")),
+                                  DataColumn(label: Text("PERSNS49")),
+                                  DataColumn(label: Text("WORKRS19")),
+                                  DataColumn(label: Text("WORKRS49")),
                                 ],
                                 rows: () {
                                   List<DataRow> rows = [];
@@ -1191,13 +1206,13 @@ class _DashboardPageState extends State<DashboardPage> {
                                       return DataRow(cells: [
                                         DataCell(Text("${row['id']}")),
                                         DataCell(Text("${row['hh19']}")),
-                                        DataCell(Text("${row['persns19']}")),
-                                        DataCell(Text("${row['workrs19']}")),
-                                        DataCell(Text("${row['emp19']}")),
                                         DataCell(Text("${row['hh49']}")),
-                                        DataCell(Text("${row['persns49']}")),
-                                        DataCell(Text("${row['workrs49']}")),
+                                        DataCell(Text("${row['emp19']}")),
                                         DataCell(Text("${row['emp49']}")),
+                                        DataCell(Text("${row['persns19']}")),
+                                        DataCell(Text("${row['persns49']}")),
+                                        DataCell(Text("${row['workrs19']}")),
+                                        DataCell(Text("${row['workrs49']}")),
                                       ]);
                                     }).toList());
                                   } else {
