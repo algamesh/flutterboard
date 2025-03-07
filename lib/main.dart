@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:html' as html; // For web injection.
+import 'dart:html' as html; // For web injection and file upload.
 import 'dart:math' show Point;
 import 'dart:math' as math; // For math calculations.
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -239,14 +239,33 @@ class _DashboardPageState extends State<DashboardPage> {
   final ScrollController _newTableHorizontalScrollController = ScrollController();
   final ScrollController _blocksTableHorizontalScrollController = ScrollController();
 
+  // New booleans to track whether each file has been uploaded.
+  bool _uploadedOldTaz = false;
+  bool _uploadedNewTaz = false;
+  bool _uploadedBlocks = false;
+
+  // New flags to indicate overall file readiness and if a file is currently processing.
+  bool _filesReady = false;
+  bool _isProcessingUpload = false;
+
   @override
   void initState() {
     super.initState();
-    _loadCachedData().then((_) {
-      setState(() {
-        _isLoading = false;
+    // Check if all three files already exist in local storage.
+    bool allUploaded = html.window.localStorage.containsKey('old_taz_geojson') &&
+        html.window.localStorage.containsKey('new_taz_geojson') &&
+        html.window.localStorage.containsKey('blocks_geojson');
+    if (allUploaded) {
+      _filesReady = true;
+      _loadCachedData().then((_) {
+        setState(() {
+          _isLoading = false;
+        });
       });
-    });
+    } else {
+      // Do not load main dashboard until all files are uploaded.
+      _isLoading = false;
+    }
   }
   
   @override
@@ -258,9 +277,25 @@ class _DashboardPageState extends State<DashboardPage> {
 
   /// Load and preprocess all GeoJSON, plus build spatial index for blocks.
   Future<void> _loadCachedData() async {
-    _cachedOldTaz = await loadGeoJson('assets/geojsons/old_taz.geojson');
-    _cachedNewTaz = await loadGeoJson('assets/geojsons/new_taz.geojson');
-    _cachedBlocks = await loadGeoJson('assets/geojsons/blocks.geojson');
+    // Load from local storage if available.
+    if (html.window.localStorage.containsKey('old_taz_geojson')) {
+      _cachedOldTaz = jsonDecode(html.window.localStorage['old_taz_geojson']!);
+      _uploadedOldTaz = true;
+    } else {
+      _cachedOldTaz = await loadGeoJson('assets/geojsons/old_taz.geojson');
+    }
+    if (html.window.localStorage.containsKey('new_taz_geojson')) {
+      _cachedNewTaz = jsonDecode(html.window.localStorage['new_taz_geojson']!);
+      _uploadedNewTaz = true;
+    } else {
+      _cachedNewTaz = await loadGeoJson('assets/geojsons/new_taz.geojson');
+    }
+    if (html.window.localStorage.containsKey('blocks_geojson')) {
+      _cachedBlocks = jsonDecode(html.window.localStorage['blocks_geojson']!);
+      _uploadedBlocks = true;
+    } else {
+      _cachedBlocks = await loadGeoJson('assets/geojsons/blocks.geojson');
+    }
 
     if (_cachedOldTaz != null) {
       _cachedOldTaz = standardizeGeoJsonProperties(_cachedOldTaz!, "old_taz");
@@ -575,20 +610,110 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
+  /// Opens a file picker for the given shapefile type and processes the file.
+  void _uploadShapefile(String type) {
+    final input = html.FileUploadInputElement()..accept = '.shp';
+    input.click();
+    input.onChange.listen((event) async {
+      if (input.files!.isNotEmpty) {
+        setState(() {
+          _isProcessingUpload = true;
+        });
+        final file = input.files!.first;
+        // Process file: convert shp to geojson.
+        Map<String, dynamic> geojsonData = await _processShapefile(file, type);
+        // Save to local storage and update cached data.
+        if (type == "old_taz") {
+          html.window.localStorage['old_taz_geojson'] = jsonEncode(geojsonData);
+          _uploadedOldTaz = true;
+          _cachedOldTaz = geojsonData;
+        } else if (type == "new_taz") {
+          html.window.localStorage['new_taz_geojson'] = jsonEncode(geojsonData);
+          _uploadedNewTaz = true;
+          _cachedNewTaz = geojsonData;
+        } else if (type == "blocks") {
+          html.window.localStorage['blocks_geojson'] = jsonEncode(geojsonData);
+          _uploadedBlocks = true;
+          _cachedBlocks = geojsonData;
+        }
+        setState(() {
+          _isProcessingUpload = false;
+        });
+        // If all three files have been uploaded, mark files as ready.
+        if (_uploadedOldTaz && _uploadedNewTaz && _uploadedBlocks) {
+          setState(() {
+            _filesReady = true;
+            _isLoading = true;
+          });
+          await _loadCachedData();
+          setState(() {
+            _isLoading = false;
+          });
+        }
+      }
+    });
+  }
+
+  /// Placeholder function to process a shapefile and convert it to GeoJSON.
+  /// In a real implementation, this would contain logic (or a web service call)
+  /// that processes the .shp file and returns the converted GeoJSON data.
+  Future<Map<String, dynamic>> _processShapefile(html.File file, String type) async {
+    // Simulate a delay for processing.
+    await Future.delayed(const Duration(seconds: 1));
+    // For demonstration, we return an empty FeatureCollection.
+    // Replace this with your actual conversion logic.
+    return {
+      "type": "FeatureCollection",
+      "features": []
+    };
+  }
+
   @override
   Widget build(BuildContext context) {
+    // While a file is being processed, show a loading screen.
     if (_isLoading) {
       return Scaffold(
-        appBar: AppBar(title: const Text("VizTAZ Dashboard")),
+        appBar: AppBar(
+          title: const Text("VizTAZ Dashboard"),
+          leadingWidth: 150,
+          leading: _buildUploadButtons(),
+        ),
         body: const Center(child: CircularProgressIndicator()),
       );
     }
 
+    // If files are not yet ready (i.e. not all uploaded), show a waiting screen.
+    if (!_filesReady) {
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text("Upload Required"),
+          leadingWidth: 150,
+          leading: _buildUploadButtons(),
+        ),
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Text("Please upload all three shapefiles to continue."),
+              if (_isProcessingUpload)
+                const Padding(
+                  padding: EdgeInsets.all(16.0),
+                  child: CircularProgressIndicator(),
+                )
+            ],
+          ),
+        ),
+      );
+    }
+
+    // Main dashboard once files are ready.
     return Scaffold(
       appBar: AppBar(
         backgroundColor:
             const Color(0xFF013220), // Very dark green for the AppBar.
         elevation: 2,
+        leadingWidth: 150,
+        leading: _buildUploadButtons(),
         title: Text(
           _searchLabel,
           style:
@@ -1372,6 +1497,51 @@ class _DashboardPageState extends State<DashboardPage> {
                   ),
                 ),
               ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Builds the three upload buttons as a Row.
+  Widget _buildUploadButtons() {
+    return Container(
+      padding: const EdgeInsets.all(4),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Old TAZ upload button.
+          Tooltip(
+            message: "Upload Old TAZ shapefile",
+            child: IconButton(
+              icon: Icon(
+                Icons.cloud_upload,
+                color: _uploadedOldTaz ? Colors.lightGreen : Colors.red,
+              ),
+              onPressed: () => _uploadShapefile("old_taz"),
+            ),
+          ),
+          // New TAZ upload button.
+          Tooltip(
+            message: "Upload New TAZ shapefile",
+            child: IconButton(
+              icon: Icon(
+                Icons.cloud_upload,
+                color: _uploadedNewTaz ? Colors.lightGreen : Colors.red,
+              ),
+              onPressed: () => _uploadShapefile("new_taz"),
+            ),
+          ),
+          // Blocks upload button.
+          Tooltip(
+            message: "Upload Blocks shapefile",
+            child: IconButton(
+              icon: Icon(
+                Icons.cloud_upload,
+                color: _uploadedBlocks ? Colors.lightGreen : Colors.red,
+              ),
+              onPressed: () => _uploadShapefile("blocks"),
             ),
           ),
         ],
