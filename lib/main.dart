@@ -5,7 +5,6 @@ import 'dart:math' show Point;
 import 'dart:math' as math; // For math calculations.
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show rootBundle;
 import 'package:maplibre_gl/maplibre_gl.dart';
 import 'package:turf/turf.dart' as turf;
 import 'package:r_tree/r_tree.dart';
@@ -40,13 +39,7 @@ Map<String, dynamic> createCirclePolygon(turf.Point center, double radius,
   };
 }
 
-/// Shared function to load GeoJSON data.
-Future<Map<String, dynamic>> loadGeoJson(String path) async {
-  final str = await rootBundle.loadString(path);
-  return jsonDecode(str) as Map<String, dynamic>;
-}
-
-/// Standardizes property names for each GeoJSON type.
+/// Shared function to standardize property names for each GeoJSON type.
 Map<String, dynamic> standardizeGeoJsonProperties(
     Map<String, dynamic> geojson, String featureType) {
   if (geojson['features'] is List) {
@@ -274,40 +267,26 @@ class _DashboardPageState extends State<DashboardPage> {
     _blocksTableHorizontalScrollController.dispose();
     super.dispose();
   }
-
-  /// Load and preprocess all GeoJSON, plus build spatial index for blocks.
+    
   Future<void> _loadCachedData() async {
-    // Load from local storage if available.
-    if (html.window.localStorage.containsKey('old_taz_geojson')) {
+    // Only update the in-memory cache if it's null.
+    if (_cachedOldTaz == null && html.window.localStorage.containsKey('old_taz_geojson')) {
       _cachedOldTaz = jsonDecode(html.window.localStorage['old_taz_geojson']!);
-      _uploadedOldTaz = true;
-    } else {
-      _cachedOldTaz = await loadGeoJson('assets/geojsons/old_taz.geojson');
-    }
-    if (html.window.localStorage.containsKey('new_taz_geojson')) {
-      _cachedNewTaz = jsonDecode(html.window.localStorage['new_taz_geojson']!);
-      _uploadedNewTaz = true;
-    } else {
-      _cachedNewTaz = await loadGeoJson('assets/geojsons/new_taz.geojson');
-    }
-    if (html.window.localStorage.containsKey('blocks_geojson')) {
-      _cachedBlocks = jsonDecode(html.window.localStorage['blocks_geojson']!);
-      _uploadedBlocks = true;
-    } else {
-      _cachedBlocks = await loadGeoJson('assets/geojsons/blocks.geojson');
-    }
-
-    if (_cachedOldTaz != null) {
       _cachedOldTaz = standardizeGeoJsonProperties(_cachedOldTaz!, "old_taz");
+      _uploadedOldTaz = true;
     }
-    if (_cachedNewTaz != null) {
+    if (_cachedNewTaz == null && html.window.localStorage.containsKey('new_taz_geojson')) {
+      _cachedNewTaz = jsonDecode(html.window.localStorage['new_taz_geojson']!);
       _cachedNewTaz = standardizeGeoJsonProperties(_cachedNewTaz!, "new_taz");
+      _uploadedNewTaz = true;
     }
-    if (_cachedBlocks != null) {
+    if (_cachedBlocks == null && html.window.localStorage.containsKey('blocks_geojson')) {
+      _cachedBlocks = jsonDecode(html.window.localStorage['blocks_geojson']!);
       _cachedBlocks = standardizeGeoJsonProperties(_cachedBlocks!, "blocks");
+      _uploadedBlocks = true;
     }
 
-    // Build an R-Tree index for blocks.
+    // Build the R-Tree index for blocks if available.
     if (_cachedBlocks != null && _cachedBlocks!['features'] != null) {
       List<RTreeDatum<dynamic>> items = [];
       for (var feature in _cachedBlocks!['features']) {
@@ -365,7 +344,6 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   /// Runs a search for the Old TAZ ID typed in, setting up the flags and clearing tables.
-  /// Note: Even if the TAZ id is the same, pressing "Search TAZ" will re-run the search.
   void _runSearch() {
     final tazIdStr = _searchController.text.trim();
     if (tazIdStr.isEmpty) {
@@ -389,10 +367,9 @@ class _DashboardPageState extends State<DashboardPage> {
       _searchLabel = "Currently Searching TAZ: $tazId";
       _hasSearched = true;
       _selectedTazId = tazId;
-      // Clear the data tables:
+      // Clear the data tables and selected highlights.
       _newTazTableData.clear();
       _blocksTableData.clear();
-      // Clear the selected highlights:
       _selectedNewTazIds.clear();
       _selectedBlockIds.clear();
     });
@@ -484,8 +461,7 @@ class _DashboardPageState extends State<DashboardPage> {
         if (_cachedBlocks != null && _cachedBlocks!['features'] != null) {
           List<dynamic> features = _cachedBlocks!['features'];
           var matchingFeature = features.firstWhere(
-            (f) =>
-                f['properties']?['geoid20'].toString() == tappedId.toString(),
+            (f) => f['properties']?['geoid20'].toString() == tappedId.toString(),
             orElse: () => null,
           );
           if (matchingFeature != null) {
@@ -610,63 +586,69 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  /// Opens a file picker for the given shapefile type and processes the file.
-  void _uploadShapefile(String type) {
-    final input = html.FileUploadInputElement()..accept = '.shp';
-    input.click();
-    input.onChange.listen((event) async {
-      if (input.files!.isNotEmpty) {
-        setState(() {
-          _isProcessingUpload = true;
-        });
-        final file = input.files!.first;
-        // Process file: convert shp to geojson.
-        Map<String, dynamic> geojsonData = await _processShapefile(file, type);
-        // Save to local storage and update cached data.
+  String? _oldTazFileName;
+  String? _newTazFileName;
+  String? _blocksFileName;
+
+void _uploadGeoJson(String type) {
+  final input = html.FileUploadInputElement()..accept = '.geojson';
+  input.click();
+  input.onChange.listen((event) async {
+    if (input.files!.isNotEmpty) {
+      setState(() {
+        _isProcessingUpload = true;
+      });
+      final file = input.files!.first;
+      // Optionally check file size (in bytes)
+      if (file.size > 5 * 1024 * 1024) { // 5MB threshold
+        debugPrint("File is too large to cache in localStorage; processing in-memory only.");
+      }
+      final reader = html.FileReader();
+      reader.readAsText(file);
+      await reader.onLoad.first;
+      Map<String, dynamic> geojsonData =
+          jsonDecode(reader.result as String) as Map<String, dynamic>;
+      
+      // If the file is small enough, cache it in localStorage.
+      if (file.size <= 5 * 1024 * 1024) {
         if (type == "old_taz") {
           html.window.localStorage['old_taz_geojson'] = jsonEncode(geojsonData);
-          _uploadedOldTaz = true;
-          _cachedOldTaz = geojsonData;
         } else if (type == "new_taz") {
           html.window.localStorage['new_taz_geojson'] = jsonEncode(geojsonData);
-          _uploadedNewTaz = true;
-          _cachedNewTaz = geojsonData;
         } else if (type == "blocks") {
           html.window.localStorage['blocks_geojson'] = jsonEncode(geojsonData);
-          _uploadedBlocks = true;
-          _cachedBlocks = geojsonData;
-        }
-        setState(() {
-          _isProcessingUpload = false;
-        });
-        // If all three files have been uploaded, mark files as ready.
-        if (_uploadedOldTaz && _uploadedNewTaz && _uploadedBlocks) {
-          setState(() {
-            _filesReady = true;
-            _isLoading = true;
-          });
-          await _loadCachedData();
-          setState(() {
-            _isLoading = false;
-          });
         }
       }
-    });
-  }
-
-  /// Placeholder function to process a shapefile and convert it to GeoJSON.
-  /// In a real implementation, this would contain logic (or a web service call)
-  /// that processes the .shp file and returns the converted GeoJSON data.
-  Future<Map<String, dynamic>> _processShapefile(html.File file, String type) async {
-    // Simulate a delay for processing.
-    await Future.delayed(const Duration(seconds: 1));
-    // For demonstration, we return an empty FeatureCollection.
-    // Replace this with your actual conversion logic.
-    return {
-      "type": "FeatureCollection",
-      "features": []
-    };
-  }
+      // In any case, store it in our in-memory cache and update the file name.
+      if (type == "old_taz") {
+        _uploadedOldTaz = true;
+        _cachedOldTaz = geojsonData;
+        _oldTazFileName = file.name;
+      } else if (type == "new_taz") {
+        _uploadedNewTaz = true;
+        _cachedNewTaz = geojsonData;
+        _newTazFileName = file.name;
+      } else if (type == "blocks") {
+        _uploadedBlocks = true;
+        _cachedBlocks = geojsonData;
+        _blocksFileName = file.name;
+      }
+      setState(() {
+        _isProcessingUpload = false;
+      });
+      if (_uploadedOldTaz && _uploadedNewTaz && _uploadedBlocks) {
+        setState(() {
+          _filesReady = true;
+          _isLoading = true;
+        });
+        await _loadCachedData();
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  });
+}
 
   @override
   Widget build(BuildContext context) {
@@ -675,6 +657,7 @@ class _DashboardPageState extends State<DashboardPage> {
       return Scaffold(
         appBar: AppBar(
           title: const Text("VizTAZ Dashboard"),
+          backgroundColor: const Color(0xFF013220), // Dark green.
           leadingWidth: 150,
           leading: _buildUploadButtons(),
         ),
@@ -682,11 +665,15 @@ class _DashboardPageState extends State<DashboardPage> {
       );
     }
 
-    // If files are not yet ready (i.e. not all uploaded), show a waiting screen.
+    // If files are not yet ready, show a waiting screen.
     if (!_filesReady) {
       return Scaffold(
         appBar: AppBar(
-          title: const Text("Upload Required"),
+          title: const Text(
+            "Upload Required",
+            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+          ),
+          backgroundColor: const Color(0xFF013220), // Very dark green for the AppBar.
           leadingWidth: 150,
           leading: _buildUploadButtons(),
         ),
@@ -694,7 +681,7 @@ class _DashboardPageState extends State<DashboardPage> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Text("Please upload all three shapefiles to continue."),
+              const Text("Please upload all three GeoJSON files to continue."),
               if (_isProcessingUpload)
                 const Padding(
                   padding: EdgeInsets.all(16.0),
@@ -709,15 +696,13 @@ class _DashboardPageState extends State<DashboardPage> {
     // Main dashboard once files are ready.
     return Scaffold(
       appBar: AppBar(
-        backgroundColor:
-            const Color(0xFF013220), // Very dark green for the AppBar.
+        backgroundColor: const Color(0xFF013220), // Very dark green for the AppBar.
         elevation: 2,
         leadingWidth: 150,
         leading: _buildUploadButtons(),
         title: Text(
           _searchLabel,
-          style:
-              const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
         centerTitle: true,
         iconTheme: const IconThemeData(color: Colors.white),
@@ -741,8 +726,7 @@ class _DashboardPageState extends State<DashboardPage> {
                   onChanged: (value) {
                     setState(() {
                       _useKilometers = value;
-                      _radius =
-                          _radiusValue * (_useKilometers ? 1000 : 1609.34);
+                      _radius = _radiusValue * (_useKilometers ? 1000 : 1609.34);
                     });
                   },
                   materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -767,8 +751,7 @@ class _DashboardPageState extends State<DashboardPage> {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text("ID Labels",
-                    style: TextStyle(color: const Color(0xFF3E2723))),
+                Text("ID Labels", style: TextStyle(color: const Color(0xFF3E2723))),
                 Switch(
                   value: _showIdLabels,
                   onChanged: (value) {
@@ -798,11 +781,9 @@ class _DashboardPageState extends State<DashboardPage> {
               child: DropdownButton<String>(
                 isDense: true,
                 value: _selectedMapStyleName,
-                icon: const Icon(Icons.keyboard_arrow_down,
-                    color: Color(0xFF3E2723)),
+                icon: const Icon(Icons.keyboard_arrow_down, color: Color(0xFF3E2723)),
                 dropdownColor: Colors.white,
-                style: const TextStyle(
-                    color: Color(0xFF3E2723), fontWeight: FontWeight.bold),
+                style: const TextStyle(color: Color(0xFF3E2723), fontWeight: FontWeight.bold),
                 underline: const SizedBox(),
                 onChanged: (newValue) {
                   setState(() {
@@ -928,8 +909,7 @@ class _DashboardPageState extends State<DashboardPage> {
                         child: Container(
                           margin: const EdgeInsets.all(4),
                           decoration: BoxDecoration(
-                            border:
-                                Border.all(color: Colors.grey.shade400),
+                            border: Border.all(color: Colors.grey.shade400),
                           ),
                           child: MapView(
                             key: ValueKey("old_${_selectedTazId ?? 'none'}_${_radius.round()}_${_selectedMapStyleName}"),
@@ -942,22 +922,12 @@ class _DashboardPageState extends State<DashboardPage> {
                             cachedBlocks: _cachedBlocks,
                             blocksIndex: _blocksIndex,
                             showIdLabels: _showIdLabels,
-                            // Disable automatic search/reload on tap for Old TAZ.
+                            // Automatic search on tap is disabled.
                             onTazSelected: (int tappedId) {
-                              // The following code is commented out to prevent automatic re-search/reload when tapping an Old TAZ.
-                              /*
-                              setState(() {
-                                _selectedTazId = tappedId;
-                                _searchController.text = tappedId.toString();
-                                _searchLabel = "Currently Searching TAZ: $tappedId";
-                              });
-                              */
                               debugPrint("Old TAZ tapped: $tappedId (automatic search disabled)");
                             },
                             mapStyle: _mapStyles[_selectedMapStyleName],
-                            syncedCameraPosition: _isSyncEnabled
-                                ? _syncedCameraPosition
-                                : null,
+                            syncedCameraPosition: _isSyncEnabled ? _syncedCameraPosition : null,
                             onCameraIdleSync: _isSyncEnabled
                                 ? (CameraPosition pos) {
                                     setState(() {
@@ -973,8 +943,7 @@ class _DashboardPageState extends State<DashboardPage> {
                         child: Container(
                           margin: const EdgeInsets.all(4),
                           decoration: BoxDecoration(
-                            border:
-                                Border.all(color: Colors.grey.shade400),
+                            border: Border.all(color: Colors.grey.shade400),
                           ),
                           child: MapView(
                             key: ValueKey("new_${_selectedTazId ?? 'none'}_${_radius.round()}_${_selectedMapStyleName}"),
@@ -993,9 +962,7 @@ class _DashboardPageState extends State<DashboardPage> {
                               _toggleNewTazRow(tappedId);
                             },
                             mapStyle: _mapStyles[_selectedMapStyleName],
-                            syncedCameraPosition: _isSyncEnabled
-                                ? _syncedCameraPosition
-                                : null,
+                            syncedCameraPosition: _isSyncEnabled ? _syncedCameraPosition : null,
                             onCameraIdleSync: _isSyncEnabled
                                 ? (CameraPosition pos) {
                                     setState(() {
@@ -1011,16 +978,14 @@ class _DashboardPageState extends State<DashboardPage> {
                         child: Container(
                           margin: const EdgeInsets.all(4),
                           decoration: BoxDecoration(
-                            border:
-                                Border.all(color: Colors.blueAccent),
+                            border: Border.all(color: Colors.blueAccent),
                             borderRadius: BorderRadius.circular(4),
                           ),
                           child: Column(
                             children: [
                               // Table header with clear button.
                               Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
                                   const Text(
                                     "New TAZ Table",
@@ -1033,9 +998,7 @@ class _DashboardPageState extends State<DashboardPage> {
                                     onPressed: _clearNewTazTable,
                                     child: const Text(
                                       "Clear",
-                                      style: TextStyle(
-                                          color: Color.fromARGB(
-                                              255, 255, 0, 0)),
+                                      style: TextStyle(color: Color.fromARGB(255, 255, 0, 0)),
                                     ),
                                   ),
                                 ],
@@ -1043,10 +1006,8 @@ class _DashboardPageState extends State<DashboardPage> {
                               Expanded(
                                 child: Container(
                                   decoration: BoxDecoration(
-                                    border: Border.all(
-                                        color: Colors.blueAccent),
-                                    borderRadius:
-                                        BorderRadius.circular(4),
+                                    border: Border.all(color: Colors.blueAccent),
+                                    borderRadius: BorderRadius.circular(4),
                                   ),
                                   child: SingleChildScrollView(
                                     scrollDirection: Axis.vertical,
@@ -1058,9 +1019,7 @@ class _DashboardPageState extends State<DashboardPage> {
                                         scrollDirection: Axis.horizontal,
                                         controller: _newTableHorizontalScrollController,
                                         child: DataTable(
-                                          headingRowColor:
-                                              MaterialStateProperty.all(
-                                                  Colors.blue[50]),
+                                          headingRowColor: MaterialStateProperty.all(Colors.blue[50]),
                                           columns: const [
                                             DataColumn(label: Text("ID")),
                                             DataColumn(label: Text("HH19")),
@@ -1102,97 +1061,27 @@ class _DashboardPageState extends State<DashboardPage> {
                                               ]));
                                             }
                                             // Compute column totals.
-                                            num sumHH19 = _newTazTableData.fold(
-                                                0,
-                                                (prev, row) =>
-                                                    prev + (row['hh19'] as num));
-                                            num sumPERSNS19 = _newTazTableData.fold(
-                                                0,
-                                                (prev, row) =>
-                                                    prev + (row['persns19'] as num));
-                                            num sumWORKRS19 = _newTazTableData.fold(
-                                                0,
-                                                (prev, row) =>
-                                                    prev + (row['workrs19'] as num));
-                                            num sumEMP19 = _newTazTableData.fold(
-                                                0,
-                                                (prev, row) =>
-                                                    prev + (row['emp19'] as num));
-                                            num sumHH49 = _newTazTableData.fold(
-                                                0,
-                                                (prev, row) =>
-                                                    prev + (row['hh49'] as num));
-                                            num sumPERSNS49 = _newTazTableData.fold(
-                                                0,
-                                                (prev, row) =>
-                                                    prev + (row['persns49'] as num));
-                                            num sumWORKRS49 = _newTazTableData.fold(
-                                                0,
-                                                (prev, row) =>
-                                                    prev + (row['workrs49'] as num));
-                                            num sumEMP49 = _newTazTableData.fold(
-                                                0,
-                                                (prev, row) =>
-                                                    prev + (row['emp49'] as num));
+                                            num sumHH19 = _newTazTableData.fold(0, (prev, row) => prev + (row['hh19'] as num));
+                                            num sumPERSNS19 = _newTazTableData.fold(0, (prev, row) => prev + (row['persns19'] as num));
+                                            num sumWORKRS19 = _newTazTableData.fold(0, (prev, row) => prev + (row['workrs19'] as num));
+                                            num sumEMP19 = _newTazTableData.fold(0, (prev, row) => prev + (row['emp19'] as num));
+                                            num sumHH49 = _newTazTableData.fold(0, (prev, row) => prev + (row['hh49'] as num));
+                                            num sumPERSNS49 = _newTazTableData.fold(0, (prev, row) => prev + (row['persns49'] as num));
+                                            num sumWORKRS49 = _newTazTableData.fold(0, (prev, row) => prev + (row['workrs49'] as num));
+                                            num sumEMP49 = _newTazTableData.fold(0, (prev, row) => prev + (row['emp49'] as num));
 
                                             rows.add(DataRow(
-                                              color: MaterialStateProperty.all(
-                                                  Colors.grey[300]),
+                                              color: MaterialStateProperty.all(Colors.grey[300]),
                                               cells: [
-                                                const DataCell(Text(
-                                                  "Total",
-                                                  style: TextStyle(
-                                                      fontWeight:
-                                                          FontWeight.bold),
-                                                )),
-                                                DataCell(Text(
-                                                  "$sumHH19",
-                                                  style: const TextStyle(
-                                                      fontWeight:
-                                                          FontWeight.bold),
-                                                )),
-                                                DataCell(Text(
-                                                  "$sumPERSNS19",
-                                                  style: const TextStyle(
-                                                      fontWeight:
-                                                          FontWeight.bold),
-                                                )),
-                                                DataCell(Text(
-                                                  "$sumWORKRS19",
-                                                  style: const TextStyle(
-                                                      fontWeight:
-                                                          FontWeight.bold),
-                                                )),
-                                                DataCell(Text(
-                                                  "$sumEMP19",
-                                                  style: const TextStyle(
-                                                      fontWeight:
-                                                          FontWeight.bold),
-                                                )),
-                                                DataCell(Text(
-                                                  "$sumHH49",
-                                                  style: const TextStyle(
-                                                      fontWeight:
-                                                          FontWeight.bold),
-                                                )),
-                                                DataCell(Text(
-                                                  "$sumPERSNS49",
-                                                  style: const TextStyle(
-                                                      fontWeight:
-                                                          FontWeight.bold),
-                                                )),
-                                                DataCell(Text(
-                                                  "$sumWORKRS49",
-                                                  style: const TextStyle(
-                                                      fontWeight:
-                                                          FontWeight.bold),
-                                                )),
-                                                DataCell(Text(
-                                                  "$sumEMP49",
-                                                  style: const TextStyle(
-                                                      fontWeight:
-                                                          FontWeight.bold),
-                                                )),
+                                                const DataCell(Text("Total", style: TextStyle(fontWeight: FontWeight.bold))),
+                                                DataCell(Text("$sumHH19", style: const TextStyle(fontWeight: FontWeight.bold))),
+                                                DataCell(Text("$sumPERSNS19", style: const TextStyle(fontWeight: FontWeight.bold))),
+                                                DataCell(Text("$sumWORKRS19", style: const TextStyle(fontWeight: FontWeight.bold))),
+                                                DataCell(Text("$sumEMP19", style: const TextStyle(fontWeight: FontWeight.bold))),
+                                                DataCell(Text("$sumHH49", style: const TextStyle(fontWeight: FontWeight.bold))),
+                                                DataCell(Text("$sumPERSNS49", style: const TextStyle(fontWeight: FontWeight.bold))),
+                                                DataCell(Text("$sumWORKRS49", style: const TextStyle(fontWeight: FontWeight.bold))),
+                                                DataCell(Text("$sumEMP49", style: const TextStyle(fontWeight: FontWeight.bold))),
                                               ],
                                             ));
                                             return rows;
@@ -1219,8 +1108,7 @@ class _DashboardPageState extends State<DashboardPage> {
                         child: Container(
                           margin: const EdgeInsets.all(4),
                           decoration: BoxDecoration(
-                            border:
-                                Border.all(color: Colors.grey.shade400),
+                            border: Border.all(color: Colors.grey.shade400),
                           ),
                           child: MapView(
                             key: ValueKey("combined_${_selectedTazId ?? 'none'}_${_radius.round()}_${_selectedMapStyleName}"),
@@ -1234,9 +1122,7 @@ class _DashboardPageState extends State<DashboardPage> {
                             cachedBlocks: _cachedBlocks,
                             blocksIndex: _blocksIndex,
                             mapStyle: _mapStyles[_selectedMapStyleName],
-                            syncedCameraPosition: _isSyncEnabled
-                                ? _syncedCameraPosition
-                                : null,
+                            syncedCameraPosition: _isSyncEnabled ? _syncedCameraPosition : null,
                             onCameraIdleSync: _isSyncEnabled
                                 ? (CameraPosition pos) {
                                     setState(() {
@@ -1252,8 +1138,7 @@ class _DashboardPageState extends State<DashboardPage> {
                         child: Container(
                           margin: const EdgeInsets.all(4),
                           decoration: BoxDecoration(
-                            border:
-                                Border.all(color: Colors.grey.shade400),
+                            border: Border.all(color: Colors.grey.shade400),
                           ),
                           child: MapView(
                             key: ValueKey("blocks_${_selectedTazId ?? 'none'}_${_radius.round()}_${_selectedMapStyleName}"),
@@ -1271,9 +1156,7 @@ class _DashboardPageState extends State<DashboardPage> {
                               _toggleBlockRow(tappedId);
                             },
                             mapStyle: _mapStyles[_selectedMapStyleName],
-                            syncedCameraPosition: _isSyncEnabled
-                                ? _syncedCameraPosition
-                                : null,
+                            syncedCameraPosition: _isSyncEnabled ? _syncedCameraPosition : null,
                             onCameraIdleSync: _isSyncEnabled
                                 ? (CameraPosition pos) {
                                     setState(() {
@@ -1290,16 +1173,14 @@ class _DashboardPageState extends State<DashboardPage> {
                         child: Container(
                           margin: const EdgeInsets.all(4),
                           decoration: BoxDecoration(
-                            border: Border.all(
-                                color: Colors.orangeAccent),
+                            border: Border.all(color: Colors.orangeAccent),
                             borderRadius: BorderRadius.circular(4),
                           ),
                           child: Column(
                             children: [
                               // Table header with clear button.
                               Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
                                   const Text(
                                     "Blocks Table",
@@ -1312,9 +1193,7 @@ class _DashboardPageState extends State<DashboardPage> {
                                     onPressed: _clearBlocksTable,
                                     child: const Text(
                                       "Clear",
-                                      style: TextStyle(
-                                          color: Color.fromARGB(
-                                              255, 255, 0, 0)),
+                                      style: TextStyle(color: Color.fromARGB(255, 255, 0, 0)),
                                     ),
                                   ),
                                 ],
@@ -1322,8 +1201,7 @@ class _DashboardPageState extends State<DashboardPage> {
                               Expanded(
                                 child: Container(
                                   decoration: BoxDecoration(
-                                    border: Border.all(
-                                        color: Colors.orangeAccent),
+                                    border: Border.all(color: Colors.orangeAccent),
                                     borderRadius: BorderRadius.circular(4),
                                   ),
                                   child: SingleChildScrollView(
@@ -1336,9 +1214,7 @@ class _DashboardPageState extends State<DashboardPage> {
                                         scrollDirection: Axis.horizontal,
                                         controller: _blocksTableHorizontalScrollController,
                                         child: DataTable(
-                                          headingRowColor:
-                                              MaterialStateProperty.all(
-                                                  Colors.orange[50]),
+                                          headingRowColor: MaterialStateProperty.all(Colors.orange[50]),
                                           columns: const [
                                             DataColumn(label: Text("ID")),
                                             DataColumn(label: Text("HH19")),
@@ -1379,106 +1255,27 @@ class _DashboardPageState extends State<DashboardPage> {
                                                 DataCell(Text("")),
                                               ]));
                                             }
-                                            // Compute totals for each column.
-                                            double sumHH19 = _blocksTableData.fold(
-                                                0.0,
-                                                (prev, row) =>
-                                                    prev +
-                                                    (row['hh19'] as num).toDouble());
-                                            double sumPERSNS19 = _blocksTableData.fold(
-                                                0.0,
-                                                (prev, row) =>
-                                                    prev +
-                                                    (row['persns19'] as num).toDouble());
-                                            double sumWORKRS19 = _blocksTableData.fold(
-                                                0.0,
-                                                (prev, row) =>
-                                                    prev +
-                                                    (row['workrs19'] as num).toDouble());
-                                            double sumEMP19 = _blocksTableData.fold(
-                                                0.0,
-                                                (prev, row) =>
-                                                    prev +
-                                                    (row['emp19'] as num).toDouble());
-                                            double sumHH49 = _blocksTableData.fold(
-                                                0.0,
-                                                (prev, row) =>
-                                                    prev +
-                                                    (row['hh49'] as num).toDouble());
-                                            double sumPERSNS49 = _blocksTableData.fold(
-                                                0.0,
-                                                (prev, row) =>
-                                                    prev +
-                                                    (row['persns49'] as num).toDouble());
-                                            double sumWORKRS49 = _blocksTableData.fold(
-                                                0.0,
-                                                (prev, row) =>
-                                                    prev +
-                                                    (row['workrs49'] as num).toDouble());
-                                            double sumEMP49 = _blocksTableData.fold(
-                                                0.0,
-                                                (prev, row) =>
-                                                    prev +
-                                                    (row['emp49'] as num).toDouble());
+                                            double sumHH19 = _blocksTableData.fold(0.0, (prev, row) => prev + (row['hh19'] as num).toDouble());
+                                            double sumPERSNS19 = _blocksTableData.fold(0.0, (prev, row) => prev + (row['persns19'] as num).toDouble());
+                                            double sumWORKRS19 = _blocksTableData.fold(0.0, (prev, row) => prev + (row['workrs19'] as num).toDouble());
+                                            double sumEMP19 = _blocksTableData.fold(0.0, (prev, row) => prev + (row['emp19'] as num).toDouble());
+                                            double sumHH49 = _blocksTableData.fold(0.0, (prev, row) => prev + (row['hh49'] as num).toDouble());
+                                            double sumPERSNS49 = _blocksTableData.fold(0.0, (prev, row) => prev + (row['persns49'] as num).toDouble());
+                                            double sumWORKRS49 = _blocksTableData.fold(0.0, (prev, row) => prev + (row['workrs49'] as num).toDouble());
+                                            double sumEMP49 = _blocksTableData.fold(0.0, (prev, row) => prev + (row['emp49'] as num).toDouble());
 
                                             rows.add(DataRow(
-                                              color: MaterialStateProperty.all(
-                                                  Colors.grey[300]),
+                                              color: MaterialStateProperty.all(Colors.grey[300]),
                                               cells: [
-                                                const DataCell(Text(
-                                                  "Total",
-                                                  style: TextStyle(
-                                                      fontWeight:
-                                                          FontWeight.bold),
-                                                )),
-                                                DataCell(Text(
-                                                  sumHH19.toString(),
-                                                  style: const TextStyle(
-                                                      fontWeight:
-                                                          FontWeight.bold),
-                                                )),
-                                                DataCell(Text(
-                                                  sumPERSNS19.toString(),
-                                                  style: const TextStyle(
-                                                      fontWeight:
-                                                          FontWeight.bold),
-                                                )),
-                                                DataCell(Text(
-                                                  sumWORKRS19.toString(),
-                                                  style: const TextStyle(
-                                                      fontWeight:
-                                                          FontWeight.bold),
-                                                )),
-                                                DataCell(Text(
-                                                  sumEMP19.toString(),
-                                                  style: const TextStyle(
-                                                      fontWeight:
-                                                          FontWeight.bold),
-                                                )),
-                                                DataCell(Text(
-                                                  sumHH49.toString(),
-                                                  style: const TextStyle(
-                                                      fontWeight:
-                                                          FontWeight.bold),
-                                                )),
-                                                DataCell(Text(
-                                                  sumPERSNS49.toString(),
-                                                  style: const TextStyle(
-                                                      fontWeight:
-                                                          FontWeight.bold),
-                                                )),
-                                                DataCell(Text(
-                                                  sumWORKRS49.toString(),
-                                                  style: const TextStyle(
-                                                      fontWeight:
-                                                          FontWeight.bold),
-                                                )),
-                                                DataCell(Text(
-                                                  sumEMP49.toString(),
-                                                  style: const TextStyle(
-                                                      fontWeight:
-                                                          FontWeight.bold),
-                                                )),
+                                                const DataCell(Text("Total", style: TextStyle(fontWeight: FontWeight.bold))),
+                                                DataCell(Text(sumHH19.toString(), style: const TextStyle(fontWeight: FontWeight.bold))),
+                                                DataCell(Text(sumPERSNS19.toString(), style: const TextStyle(fontWeight: FontWeight.bold))),
+                                                DataCell(Text(sumWORKRS19.toString(), style: const TextStyle(fontWeight: FontWeight.bold))),
+                                                DataCell(Text(sumEMP19.toString(), style: const TextStyle(fontWeight: FontWeight.bold))),
+                                                DataCell(Text(sumHH49.toString(), style: const TextStyle(fontWeight: FontWeight.bold))),
+                                                DataCell(Text(sumPERSNS49.toString(), style: const TextStyle(fontWeight: FontWeight.bold))),
+                                                DataCell(Text(sumWORKRS49.toString(), style: const TextStyle(fontWeight: FontWeight.bold))),
+                                                DataCell(Text(sumEMP49.toString(), style: const TextStyle(fontWeight: FontWeight.bold))),
                                               ],
                                             ));
                                             return rows;
@@ -1503,7 +1300,7 @@ class _DashboardPageState extends State<DashboardPage> {
       ),
     );
   }
-
+  
   /// Builds the three upload buttons as a Row.
   Widget _buildUploadButtons() {
     return Container(
@@ -1513,35 +1310,35 @@ class _DashboardPageState extends State<DashboardPage> {
         children: [
           // Old TAZ upload button.
           Tooltip(
-            message: "Upload Old TAZ shapefile",
+            message: "Upload Old TAZ GeoJSON file",
             child: IconButton(
               icon: Icon(
                 Icons.cloud_upload,
                 color: _uploadedOldTaz ? Colors.lightGreen : Colors.red,
               ),
-              onPressed: () => _uploadShapefile("old_taz"),
+              onPressed: () => _uploadGeoJson("old_taz"),
             ),
           ),
           // New TAZ upload button.
           Tooltip(
-            message: "Upload New TAZ shapefile",
+            message: "Upload New TAZ GeoJSON file",
             child: IconButton(
               icon: Icon(
                 Icons.cloud_upload,
                 color: _uploadedNewTaz ? Colors.lightGreen : Colors.red,
               ),
-              onPressed: () => _uploadShapefile("new_taz"),
+              onPressed: () => _uploadGeoJson("new_taz"),
             ),
           ),
           // Blocks upload button.
           Tooltip(
-            message: "Upload Blocks shapefile",
+            message: "Upload Blocks GeoJSON file",
             child: IconButton(
               icon: Icon(
                 Icons.cloud_upload,
                 color: _uploadedBlocks ? Colors.lightGreen : Colors.red,
               ),
-              onPressed: () => _uploadShapefile("blocks"),
+              onPressed: () => _uploadGeoJson("blocks"),
             ),
           ),
         ],
@@ -1607,18 +1404,16 @@ class MapViewState extends State<MapView> {
 
     // If selection changes in New TAZ, update the filter.
     if (widget.mode == MapViewMode.newTaz && controller != null) {
-      final newFilter =
-          (widget.selectedIds != null && widget.selectedIds!.isNotEmpty)
-              ? ["in", "taz_id", ...widget.selectedIds!.toList()]
-              : ["==", "taz_id", ""];
+      final newFilter = (widget.selectedIds != null && widget.selectedIds!.isNotEmpty)
+          ? ["in", "taz_id", ...widget.selectedIds!.toList()]
+          : ["==", "taz_id", ""];
       controller!.setFilter("selected_new_taz_fill", newFilter);
     }
     // If selection changes in Blocks, update the filter.
     if (widget.mode == MapViewMode.blocks && controller != null) {
-      final newFilter =
-          (widget.selectedIds != null && widget.selectedIds!.isNotEmpty)
-              ? ["in", "geoid20", ...widget.selectedIds!.toList()]
-              : ["==", "geoid20", ""];
+      final newFilter = (widget.selectedIds != null && widget.selectedIds!.isNotEmpty)
+          ? ["in", "geoid20", ...widget.selectedIds!.toList()]
+          : ["==", "geoid20", ""];
       controller!.setFilter("selected_blocks_fill", newFilter);
     }
 
@@ -1760,20 +1555,23 @@ class MapViewState extends State<MapView> {
     );
   }
 
-  /// Returns a two-line description:
-  /// For old/new TAZ maps: "Title" then "TAZ: ..." (or "None")
-  /// For blocks: "Title" then "Selected: ..." (or "None")
   String _buildLabelText() {
-    if (widget.mode == MapViewMode.oldTaz ||
-        widget.mode == MapViewMode.newTaz) {
+    // if (widget.mode == MapViewMode.newTaz || widget.mode == MapViewMode.combined || widget.mode == MapViewMode.blocks) {
+    //   return widget.title;
+    // } else if (widget.mode == MapViewMode.newTaz) {
+    //   return "${widget.title}\nTAZ: ${widget.selectedTazId ?? 'None'}";
+    // } else if (widget.mode == MapViewMode.blocks) {
+    //   if (widget.selectedIds != null && widget.selectedIds!.isNotEmpty) {
+    //     return "${widget.title}\nSelected: ${widget.selectedIds!.join(', ')}";
+    //   } else {
+    //     return "${widget.title}\nSelected: None";
+    //   }
+    // } 
+    
+    if (widget.mode == MapViewMode.oldTaz) {
       return "${widget.title}\nTAZ: ${widget.selectedTazId ?? 'None'}";
-    } else if (widget.mode == MapViewMode.blocks) {
-      if (widget.selectedIds != null && widget.selectedIds!.isNotEmpty) {
-        return "${widget.title}\nSelected: ${widget.selectedIds!.join(', ')}";
-      } else {
-        return "${widget.title}\nSelected: None";
-      }
-    } else {
+    }
+    else {
       return widget.title;
     }
   }
@@ -1933,8 +1731,11 @@ class MapViewState extends State<MapView> {
         widget.selectedTazId == null ||
         widget.radius == null) return null;
 
-    final oldTazData = widget.cachedOldTaz ??
-        await loadGeoJson('assets/geojsons/old_taz.geojson');
+    final oldTazData = widget.cachedOldTaz;
+    if (oldTazData == null) {
+      debugPrint("Old TAZ data not loaded.");
+      return null;
+    }
     final List<dynamic> allFeatures = oldTazData['features'] as List<dynamic>;
     final targetFeature = allFeatures.firstWhere(
       (f) =>
@@ -2020,8 +1821,11 @@ class MapViewState extends State<MapView> {
         widget.selectedTazId == null ||
         widget.radius == null) return null;
 
-    final oldTazData = widget.cachedOldTaz ??
-        await loadGeoJson('assets/geojsons/old_taz.geojson');
+    final oldTazData = widget.cachedOldTaz;
+    if (oldTazData == null) {
+      debugPrint("Old TAZ data not loaded.");
+      return null;
+    }
     final List<dynamic> oldFeatures = oldTazData['features'] as List<dynamic>;
     final oldFeature = oldFeatures.firstWhere(
       (f) =>
@@ -2038,8 +1842,11 @@ class MapViewState extends State<MapView> {
     final turf.Point oldCentroid = oldCentroidFeature.geometry as turf.Point;
     double radiusKm = widget.radius! / 1000;
 
-    final newTazData = widget.cachedNewTaz ??
-        await loadGeoJson('assets/geojsons/new_taz.geojson');
+    final newTazData = widget.cachedNewTaz;
+    if (newTazData == null) {
+      debugPrint("New TAZ data not loaded.");
+      return null;
+    }
     final List<dynamic> newFeatures = newTazData['features'] as List<dynamic>;
 
     // Filter new TAZ features by distance to the old TAZ centroid.
@@ -2113,8 +1920,11 @@ class MapViewState extends State<MapView> {
     if (controller == null ||
         widget.selectedTazId == null ||
         widget.radius == null) return null;
-    final oldTazData = widget.cachedOldTaz ??
-        await loadGeoJson('assets/geojsons/old_taz.geojson');
+    final oldTazData = widget.cachedOldTaz;
+    if (oldTazData == null) {
+      debugPrint("Old TAZ data not loaded.");
+      return null;
+    }
     final List<dynamic> oldFeatures = oldTazData['features'] as List<dynamic>;
     final oldFeature = oldFeatures.firstWhere(
       (f) =>
@@ -2133,8 +1943,7 @@ class MapViewState extends State<MapView> {
     final double centerLat = (oldCentroid.coordinates[1]!).toDouble();
     final double centerLng = (oldCentroid.coordinates[0]!).toDouble();
     final double deltaLat = radiusKm / 110.574;
-    final double deltaLng =
-        radiusKm / (111.320 * math.cos(centerLat * math.pi / 180));
+    final double deltaLng = radiusKm / (111.320 * math.cos(centerLat * math.pi / 180));
     final math.Rectangle<double> circleBBox = math.Rectangle(
       centerLng - deltaLng,
       centerLat - deltaLat,
@@ -2150,8 +1959,7 @@ class MapViewState extends State<MapView> {
           .map((datum) => datum.value)
           .toList();
     } else {
-      candidateBlocks =
-          (widget.cachedBlocks?['features'] as List<dynamic>) ?? [];
+      candidateBlocks = (widget.cachedBlocks?['features'] as List<dynamic>) ?? [];
     }
     final filteredBlocks = candidateBlocks.where((block) {
       final turf.Feature blockFeature = turf.Feature.fromJson(block);
@@ -2250,8 +2058,7 @@ class MapViewState extends State<MapView> {
     required String lineColor,
     double lineWidth = 2.0,
   }) async {
-    await controller!
-        .addSource(sourceId, GeojsonSourceProperties(data: geojsonData));
+    await controller!.addSource(sourceId, GeojsonSourceProperties(data: geojsonData));
     await controller!.addLineLayer(
       sourceId,
       layerId,
@@ -2270,8 +2077,7 @@ class MapViewState extends State<MapView> {
     required String fillColor,
     double fillOpacity = 0.08,
   }) async {
-    await controller!
-        .addSource(sourceId, GeojsonSourceProperties(data: geojsonData));
+    await controller!.addSource(sourceId, GeojsonSourceProperties(data: geojsonData));
     await controller!.addFillLayer(
       sourceId,
       layerId,
@@ -2283,8 +2089,7 @@ class MapViewState extends State<MapView> {
   }
 
   /// Zooms the camera to fit all features in the given FeatureCollection.
-  Future<void> _zoomToFeatureBounds(
-      Map<String, dynamic> featureCollection) async {
+  Future<void> _zoomToFeatureBounds(Map<String, dynamic> featureCollection) async {
     if (controller == null) return;
     double? minLat, maxLat, minLng, maxLng;
     final features = featureCollection['features'] as List<dynamic>;
@@ -2348,8 +2153,7 @@ class MapViewState extends State<MapView> {
     } else {
       return;
     }
-    final features =
-        await controller!.queryRenderedFeatures(tapPoint, layersToQuery, []);
+    final features = await controller!.queryRenderedFeatures(tapPoint, layersToQuery, []);
     if (features != null && features.isNotEmpty) {
       final feature = features.first;
       if (widget.mode == MapViewMode.blocks) {
