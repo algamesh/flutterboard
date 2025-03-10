@@ -590,65 +590,68 @@ class _DashboardPageState extends State<DashboardPage> {
   String? _newTazFileName;
   String? _blocksFileName;
 
-void _uploadGeoJson(String type) {
-  final input = html.FileUploadInputElement()..accept = '.geojson';
-  input.click();
-  input.onChange.listen((event) async {
-    if (input.files!.isNotEmpty) {
-      setState(() {
-        _isProcessingUpload = true;
-      });
-      final file = input.files!.first;
-      // Optionally check file size (in bytes)
-      if (file.size > 5 * 1024 * 1024) { // 5MB threshold
-        debugPrint("File is too large to cache in localStorage; processing in-memory only.");
-      }
-      final reader = html.FileReader();
-      reader.readAsText(file);
-      await reader.onLoad.first;
-      Map<String, dynamic> geojsonData =
-          jsonDecode(reader.result as String) as Map<String, dynamic>;
-      
-      // If the file is small enough, cache it in localStorage.
-      if (file.size <= 5 * 1024 * 1024) {
+  void _uploadGeoJson(String type) {
+    final input = html.FileUploadInputElement()..accept = '.geojson';
+    input.click();
+    input.onChange.listen((event) async {
+      if (input.files!.isNotEmpty) {
+        setState(() {
+          _isProcessingUpload = true;
+        });
+        final file = input.files!.first;
+        // Optionally check file size (in bytes)
+        if (file.size > 5 * 1024 * 1024) { // 5MB threshold
+          debugPrint("File is too large to cache in localStorage; processing in-memory only.");
+        }
+        final reader = html.FileReader();
+        reader.readAsText(file);
+        await reader.onLoad.first;
+        Map<String, dynamic> geojsonData =
+            jsonDecode(reader.result as String) as Map<String, dynamic>;
+        
+        // Standardize property names: convert all keys to lowercase (and apply renaming logic)
+        geojsonData = standardizeGeoJsonProperties(geojsonData, type);
+        
+        // If the file is small enough, cache it in localStorage.
+        if (file.size <= 5 * 1024 * 1024) {
+          if (type == "old_taz") {
+            html.window.localStorage['old_taz_geojson'] = jsonEncode(geojsonData);
+          } else if (type == "new_taz") {
+            html.window.localStorage['new_taz_geojson'] = jsonEncode(geojsonData);
+          } else if (type == "blocks") {
+            html.window.localStorage['blocks_geojson'] = jsonEncode(geojsonData);
+          }
+        }
+        // In any case, store it in our in-memory cache and update the file name.
         if (type == "old_taz") {
-          html.window.localStorage['old_taz_geojson'] = jsonEncode(geojsonData);
+          _uploadedOldTaz = true;
+          _cachedOldTaz = geojsonData;
+          _oldTazFileName = file.name;
         } else if (type == "new_taz") {
-          html.window.localStorage['new_taz_geojson'] = jsonEncode(geojsonData);
+          _uploadedNewTaz = true;
+          _cachedNewTaz = geojsonData;
+          _newTazFileName = file.name;
         } else if (type == "blocks") {
-          html.window.localStorage['blocks_geojson'] = jsonEncode(geojsonData);
+          _uploadedBlocks = true;
+          _cachedBlocks = geojsonData;
+          _blocksFileName = file.name;
+        }
+        setState(() {
+          _isProcessingUpload = false;
+        });
+        if (_uploadedOldTaz && _uploadedNewTaz && _uploadedBlocks) {
+          setState(() {
+            _filesReady = true;
+            _isLoading = true;
+          });
+          await _loadCachedData();
+          setState(() {
+            _isLoading = false;
+          });
         }
       }
-      // In any case, store it in our in-memory cache and update the file name.
-      if (type == "old_taz") {
-        _uploadedOldTaz = true;
-        _cachedOldTaz = geojsonData;
-        _oldTazFileName = file.name;
-      } else if (type == "new_taz") {
-        _uploadedNewTaz = true;
-        _cachedNewTaz = geojsonData;
-        _newTazFileName = file.name;
-      } else if (type == "blocks") {
-        _uploadedBlocks = true;
-        _cachedBlocks = geojsonData;
-        _blocksFileName = file.name;
-      }
-      setState(() {
-        _isProcessingUpload = false;
-      });
-      if (_uploadedOldTaz && _uploadedNewTaz && _uploadedBlocks) {
-        setState(() {
-          _filesReady = true;
-          _isLoading = true;
-        });
-        await _loadCachedData();
-        setState(() {
-          _isLoading = false;
-        });
-      }
-    }
-  });
-}
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
