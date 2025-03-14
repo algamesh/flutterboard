@@ -1078,13 +1078,13 @@ class _DashboardPageState extends State<DashboardPage> {
                                               cells: [
                                                 const DataCell(Text("Total", style: TextStyle(fontWeight: FontWeight.bold))),
                                                 DataCell(Text("$sumHH19", style: const TextStyle(fontWeight: FontWeight.bold))),
-                                                DataCell(Text("$sumPERSNS19", style: const TextStyle(fontWeight: FontWeight.bold))),
-                                                DataCell(Text("$sumWORKRS19", style: const TextStyle(fontWeight: FontWeight.bold))),
-                                                DataCell(Text("$sumEMP19", style: const TextStyle(fontWeight: FontWeight.bold))),
                                                 DataCell(Text("$sumHH49", style: const TextStyle(fontWeight: FontWeight.bold))),
-                                                DataCell(Text("$sumPERSNS49", style: const TextStyle(fontWeight: FontWeight.bold))),
-                                                DataCell(Text("$sumWORKRS49", style: const TextStyle(fontWeight: FontWeight.bold))),
+                                                DataCell(Text("$sumEMP19", style: const TextStyle(fontWeight: FontWeight.bold))),
                                                 DataCell(Text("$sumEMP49", style: const TextStyle(fontWeight: FontWeight.bold))),
+                                                DataCell(Text("$sumPERSNS19", style: const TextStyle(fontWeight: FontWeight.bold))),
+                                                DataCell(Text("$sumPERSNS49", style: const TextStyle(fontWeight: FontWeight.bold))),
+                                                DataCell(Text("$sumWORKRS19", style: const TextStyle(fontWeight: FontWeight.bold))),
+                                                DataCell(Text("$sumWORKRS49", style: const TextStyle(fontWeight: FontWeight.bold))),
                                               ],
                                             ));
                                             return rows;
@@ -1795,7 +1795,7 @@ class MapViewState extends State<MapView> {
       layerId: "old_taz_target_fill",
       geojsonData: {'type': 'FeatureCollection', 'features': targetFeatures},
       fillColor: "#ff8000",
-      fillOpacity: 0.18,
+      fillOpacity: 0.08,
     );
 
     // The "other" TAZ polygons within the radius.
@@ -1811,7 +1811,7 @@ class MapViewState extends State<MapView> {
       layerId: "old_taz_others_fill",
       geojsonData: {'type': 'FeatureCollection', 'features': otherFeatures},
       fillColor: "#4169E1",
-      fillOpacity: 0.18,
+      fillOpacity: 0.08,
     );
 
     if (zoom) await _zoomToFeatureBounds(combinedData);
@@ -1884,7 +1884,7 @@ class MapViewState extends State<MapView> {
       layerId: "new_taz_fill",
       geojsonData: filteredNewData,
       fillColor: "#FF0000",
-      fillOpacity: 0.18,
+      fillOpacity: 0.08,
     );
 
     if (zoom) await _zoomToFeatureBounds(filteredNewData);
@@ -1912,7 +1912,7 @@ class MapViewState extends State<MapView> {
       "blocks_fill",
       FillLayerProperties(
         fillColor: "#FFA500",
-        fillOpacity: 0.18,
+        fillOpacity: 0.08,
       ),
     );
     await _zoomToFeatureBounds(blocksData);
