@@ -1272,13 +1272,13 @@ class _DashboardPageState extends State<DashboardPage> {
                                               cells: [
                                                 const DataCell(Text("Total", style: TextStyle(fontWeight: FontWeight.bold))),
                                                 DataCell(Text(sumHH19.toString(), style: const TextStyle(fontWeight: FontWeight.bold))),
-                                                DataCell(Text(sumPERSNS19.toString(), style: const TextStyle(fontWeight: FontWeight.bold))),
-                                                DataCell(Text(sumWORKRS19.toString(), style: const TextStyle(fontWeight: FontWeight.bold))),
-                                                DataCell(Text(sumEMP19.toString(), style: const TextStyle(fontWeight: FontWeight.bold))),
                                                 DataCell(Text(sumHH49.toString(), style: const TextStyle(fontWeight: FontWeight.bold))),
-                                                DataCell(Text(sumPERSNS49.toString(), style: const TextStyle(fontWeight: FontWeight.bold))),
-                                                DataCell(Text(sumWORKRS49.toString(), style: const TextStyle(fontWeight: FontWeight.bold))),
+                                                DataCell(Text(sumEMP19.toString(), style: const TextStyle(fontWeight: FontWeight.bold))),
                                                 DataCell(Text(sumEMP49.toString(), style: const TextStyle(fontWeight: FontWeight.bold))),
+                                                DataCell(Text(sumPERSNS19.toString(), style: const TextStyle(fontWeight: FontWeight.bold))),
+                                                DataCell(Text(sumPERSNS49.toString(), style: const TextStyle(fontWeight: FontWeight.bold))),
+                                                DataCell(Text(sumWORKRS19.toString(), style: const TextStyle(fontWeight: FontWeight.bold))),
+                                                DataCell(Text(sumWORKRS49.toString(), style: const TextStyle(fontWeight: FontWeight.bold))),
                                               ],
                                             ));
                                             return rows;
