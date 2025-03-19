@@ -83,6 +83,23 @@ Map<String, dynamic> standardizeGeoJsonProperties(
   return geojson;
 }
 
+/// Helper function to create consistent SymbolLayerProperties for ID labels.
+SymbolLayerProperties createIdLabelProperties({
+  required String textField,
+  required String textColor,
+  double textSize = 14,
+  String textHaloColor = "#FFFFFF",
+  double textHaloWidth = 0.5,
+}) {
+  return SymbolLayerProperties(
+    textField: textField,
+    textSize: textSize,
+    textColor: textColor,
+    textHaloColor: textHaloColor,
+    textHaloWidth: textHaloWidth,
+  );
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   if (kIsWeb) {
@@ -1440,23 +1457,17 @@ class MapViewState extends State<MapView> {
           controller!.addSymbolLayer(
             "old_taz_target_source",
             "old_taz_target_labels",
-            SymbolLayerProperties(
+            createIdLabelProperties(
               textField: "{taz_id}",
-              textSize: 14,
-              textColor: "#FF8000",
-              textHaloColor: "#FFFFFF",
-              textHaloWidth: .5,
+              textColor: "#F85B00",
             ),
           );
           controller!.addSymbolLayer(
             "old_taz_others_source",
             "old_taz_others_labels",
-            SymbolLayerProperties(
+            createIdLabelProperties(
               textField: "{taz_id}",
-              textSize: 14,
               textColor: "#0000FF",
-              textHaloColor: "#FFFFFF",
-              textHaloWidth: .5,
             ),
           );
         } else {
@@ -1468,12 +1479,9 @@ class MapViewState extends State<MapView> {
           controller!.addSymbolLayer(
             "new_taz_source",
             "new_taz_labels",
-            SymbolLayerProperties(
+            createIdLabelProperties(
               textField: "{taz_id}",
-              textSize: 14,
               textColor: "#FF0000",
-              textHaloColor: "#FFFFFF",
-              textHaloWidth: .5,
             ),
           );
         } else {
@@ -1484,12 +1492,9 @@ class MapViewState extends State<MapView> {
           controller!.addSymbolLayer(
             "blocks_fill_source",
             "blocks_labels",
-            SymbolLayerProperties(
+            createIdLabelProperties(
               textField: "{block_label}",
-              textSize: 14,
               textColor: "#000000",
-              textHaloColor: "#FFFFFF",
-              textHaloWidth: .5,
             ),
           );
         } else {
@@ -1617,23 +1622,17 @@ class MapViewState extends State<MapView> {
           await controller!.addSymbolLayer(
             "old_taz_target_source",
             "old_taz_target_labels",
-            SymbolLayerProperties(
+            createIdLabelProperties(
               textField: "{taz_id}",
-              textSize: 12,
-              textColor: "#0000FF",
-              textHaloColor: "#FFFFFF",
-              textHaloWidth: 1,
+              textColor: "#F85B00",
             ),
           );
           await controller!.addSymbolLayer(
             "old_taz_others_source",
             "old_taz_others_labels",
-            SymbolLayerProperties(
+            createIdLabelProperties(
               textField: "{taz_id}",
-              textSize: 12,
-              textColor: "#4169E1",
-              textHaloColor: "#FFFFFF",
-              textHaloWidth: 1,
+              textColor: "#0000FF",
             ),
           );
         }
@@ -1656,12 +1655,9 @@ class MapViewState extends State<MapView> {
           await controller!.addSymbolLayer(
             "new_taz_source",
             "new_taz_labels",
-            SymbolLayerProperties(
+            createIdLabelProperties(
               textField: "{taz_id}",
-              textSize: 12,
               textColor: "#FF0000",
-              textHaloColor: "#FFFFFF",
-              textHaloWidth: 1,
             ),
           );
         }
@@ -1688,12 +1684,9 @@ class MapViewState extends State<MapView> {
           await controller!.addSymbolLayer(
             "blocks_fill_source",
             "blocks_labels",
-            SymbolLayerProperties(
+            createIdLabelProperties(
               textField: "{block_label}",
-              textSize: 12,
               textColor: "#000000",
-              textHaloColor: "#FFFFFF",
-              textHaloWidth: 1,
             ),
           );
         }
