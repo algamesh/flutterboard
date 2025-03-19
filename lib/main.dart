@@ -503,7 +503,7 @@ class _DashboardPageState extends State<DashboardPage> {
               ),
               child: Slider(
                 min: 0.5,
-                max: 3.0,
+                max: 5.0,
                 divisions: 5,
                 label: _radiusValue.toStringAsFixed(1),
                 value: _radiusValue,
@@ -533,7 +533,7 @@ class _DashboardPageState extends State<DashboardPage> {
                 double? newVal = double.tryParse(_radiusController.text);
                 if (newVal == null) newVal = 0.5;
                 if (newVal < 0.5) newVal = 0.5;
-                if (newVal > 3.0) newVal = 3.0;
+                if (newVal > 5.0) newVal = 5.0;
                 setState(() {
                   _radiusValue = newVal!;
                   _radius = _radiusValue * (_useKilometers ? 1000 : 1609.34);
@@ -802,18 +802,18 @@ class _DashboardPageState extends State<DashboardPage> {
               ),
             ),
           ),
-          // Settings button.
-          Container(
-            margin: const EdgeInsets.only(right: 16.0),
-            decoration: const BoxDecoration(
-              shape: BoxShape.circle,
-              color: Colors.white,
-            ),
-            child: IconButton(
-              icon: const Icon(Icons.settings, color: Colors.blue),
-              onPressed: () => _goToConfigPage(context),
-            ),
-          ),
+          // // Settings button.
+          // Container(
+          //   margin: const EdgeInsets.only(right: 16.0),
+          //   decoration: const BoxDecoration(
+          //     shape: BoxShape.circle,
+          //     color: Colors.white,
+          //   ),
+          //   child: IconButton(
+          //     icon: const Icon(Icons.settings, color: Colors.blue),
+          //     onPressed: () => _goToConfigPage(context),
+          //   ),
+          // ),
         ],
       ),
       // Main layout: Grid with two rows and three equally wide panels.
@@ -916,7 +916,7 @@ class _DashboardPageState extends State<DashboardPage> {
                           ),
                           child: MapView(
                             key: ValueKey("old_${_selectedTazId ?? 'none'}_${_radius.round()}_${_selectedMapStyleName}"),
-                            title: "Old TAZ (Blue target, Blue others)",
+                            title: "Old TAZ",
                             mode: MapViewMode.oldTaz,
                             drawShapes: _hasSearched,
                             selectedTazId: _selectedTazId,
@@ -950,7 +950,7 @@ class _DashboardPageState extends State<DashboardPage> {
                           ),
                           child: MapView(
                             key: ValueKey("new_${_selectedTazId ?? 'none'}_${_radius.round()}_${_selectedMapStyleName}"),
-                            title: "New TAZ (Red Outline)",
+                            title: "New TAZ",
                             mode: MapViewMode.newTaz,
                             drawShapes: _hasSearched,
                             selectedTazId: _selectedTazId,
@@ -1442,10 +1442,10 @@ class MapViewState extends State<MapView> {
             "old_taz_target_labels",
             SymbolLayerProperties(
               textField: "{taz_id}",
-              textSize: 12,
-              textColor: "#0000FF",
+              textSize: 14,
+              textColor: "#FF8000",
               textHaloColor: "#FFFFFF",
-              textHaloWidth: 1,
+              textHaloWidth: .5,
             ),
           );
           controller!.addSymbolLayer(
@@ -1453,10 +1453,10 @@ class MapViewState extends State<MapView> {
             "old_taz_others_labels",
             SymbolLayerProperties(
               textField: "{taz_id}",
-              textSize: 12,
-              textColor: "#4169E1",
+              textSize: 14,
+              textColor: "#0000FF",
               textHaloColor: "#FFFFFF",
-              textHaloWidth: 1,
+              textHaloWidth: .5,
             ),
           );
         } else {
@@ -1470,10 +1470,10 @@ class MapViewState extends State<MapView> {
             "new_taz_labels",
             SymbolLayerProperties(
               textField: "{taz_id}",
-              textSize: 12,
+              textSize: 14,
               textColor: "#FF0000",
               textHaloColor: "#FFFFFF",
-              textHaloWidth: 1,
+              textHaloWidth: .5,
             ),
           );
         } else {
@@ -1486,10 +1486,10 @@ class MapViewState extends State<MapView> {
             "blocks_labels",
             SymbolLayerProperties(
               textField: "{block_label}",
-              textSize: 12,
+              textSize: 14,
               textColor: "#000000",
               textHaloColor: "#FFFFFF",
-              textHaloWidth: 1,
+              textHaloWidth: .5,
             ),
           );
         } else {
@@ -1795,7 +1795,7 @@ class MapViewState extends State<MapView> {
       layerId: "old_taz_target_fill",
       geojsonData: {'type': 'FeatureCollection', 'features': targetFeatures},
       fillColor: "#ff8000",
-      fillOpacity: 0.08,
+      fillOpacity: 0.06,
     );
 
     // The "other" TAZ polygons within the radius.
@@ -1811,7 +1811,7 @@ class MapViewState extends State<MapView> {
       layerId: "old_taz_others_fill",
       geojsonData: {'type': 'FeatureCollection', 'features': otherFeatures},
       fillColor: "#4169E1",
-      fillOpacity: 0.08,
+      fillOpacity: 0.06,
     );
 
     if (zoom) await _zoomToFeatureBounds(combinedData);
@@ -1884,7 +1884,7 @@ class MapViewState extends State<MapView> {
       layerId: "new_taz_fill",
       geojsonData: filteredNewData,
       fillColor: "#FF0000",
-      fillOpacity: 0.08,
+      fillOpacity: 0.06,
     );
 
     if (zoom) await _zoomToFeatureBounds(filteredNewData);
@@ -1912,7 +1912,7 @@ class MapViewState extends State<MapView> {
       "blocks_fill",
       FillLayerProperties(
         fillColor: "#FFA500",
-        fillOpacity: 0.08,
+        fillOpacity: 0.06,
       ),
     );
     await _zoomToFeatureBounds(blocksData);
@@ -2078,7 +2078,7 @@ class MapViewState extends State<MapView> {
     required String layerId,
     required Map<String, dynamic> geojsonData,
     required String fillColor,
-    double fillOpacity = 0.08,
+    double fillOpacity = 0.06,
   }) async {
     await controller!.addSource(sourceId, GeojsonSourceProperties(data: geojsonData));
     await controller!.addFillLayer(
