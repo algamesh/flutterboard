@@ -882,85 +882,91 @@ class _DashboardPageState extends State<DashboardPage> {
       // Main layout: Grid with two rows and three equally wide panels.
       body: Column(
         children: [
-          // Top control bar.
-          Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: Row(
-              children: [
-                // Old TAZ ID text field.
-                SizedBox(
-                  width: 120,
-                  child: TextField(
-                    controller: _searchController,
-                    decoration: const InputDecoration(
-                      labelText: "Old TAZ ID",
-                      filled: true,
-                      fillColor: Colors.white,
-                      border: OutlineInputBorder(),
+          // Top control bar wrapped in a horizontal scroll view to prevent overflow errors.
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minWidth: MediaQuery.of(context).size.width),
+              child: Padding(
+                padding: const EdgeInsets.all(8.0),
+                child: Row(
+                  children: [
+                    // Old TAZ ID text field.
+                    SizedBox(
+                      width: 120,
+                      child: TextField(
+                        controller: _searchController,
+                        decoration: const InputDecoration(
+                          labelText: "Old TAZ ID",
+                          filled: true,
+                          fillColor: Colors.white,
+                          border: OutlineInputBorder(),
+                        ),
+                        onSubmitted: (_) => _runSearch(),
+                      ),
                     ),
-                    onSubmitted: (_) => _runSearch(),
-                  ),
+                    const SizedBox(width: 8),
+                    // Search TAZ button.
+                    ElevatedButton(
+                      onPressed: _runSearch,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blue[900],
+                        foregroundColor: Colors.white,
+                      ),
+                      child: const Text("Search TAZ"),
+                    ),
+                    const SizedBox(width: 8),
+                    // Vertical divider.
+                    Container(
+                      height: 40,
+                      width: 1,
+                      color: Colors.grey,
+                    ),
+                    const SizedBox(width: 8),
+                    // View Sync toggle button.
+                    ElevatedButton(
+                      onPressed: () {
+                        setState(() {
+                          _isSyncEnabled = !_isSyncEnabled;
+                          if (!_isSyncEnabled) {
+                            // If turning sync OFF, clear the synced position.
+                            _syncedCameraPosition = null;
+                          }
+                        });
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _isSyncEnabled
+                            ? const Color(0xFF8B0000)
+                            : const Color(0xFF006400),
+                      ),
+                      child: Text(
+                        _isSyncEnabled ? "View Sync ON" : "View Sync OFF",
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    // Open in Google Maps button.
+                    ElevatedButton(
+                      onPressed: _openInGoogleMaps,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.deepOrange,
+                        foregroundColor: Colors.white,
+                      ),
+                      child: const Text("Open in Google Maps"),
+                    ),
+                    const SizedBox(width: 8),
+                    // Vertical divider.
+                    Container(
+                      height: 40,
+                      width: 1,
+                      color: Colors.grey,
+                    ),
+                    const SizedBox(width: 12),
+                    // Radius slider & text input.
+                    _buildRadiusControl(),
+                  ],
                 ),
-                const SizedBox(width: 8),
-                // Search TAZ button.
-                ElevatedButton(
-                  onPressed: _runSearch,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blue[900],
-                    foregroundColor: Colors.white,
-                  ),
-                  child: const Text("Search TAZ"),
-                ),
-                const SizedBox(width: 8),
-                // Vertical divider.
-                Container(
-                  height: 40,
-                  width: 1,
-                  color: Colors.grey,
-                ),
-                const SizedBox(width: 8),
-                // View Sync toggle button.
-                ElevatedButton(
-                  onPressed: () {
-                    setState(() {
-                      _isSyncEnabled = !_isSyncEnabled;
-                      if (!_isSyncEnabled) {
-                        // If turning sync OFF, clear the synced position.
-                        _syncedCameraPosition = null;
-                      }
-                    });
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: _isSyncEnabled
-                        ? const Color(0xFF8B0000)
-                        : const Color(0xFF006400),
-                  ),
-                  child: Text(
-                    _isSyncEnabled ? "View Sync ON" : "View Sync OFF",
-                    style: const TextStyle(color: Colors.white),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                // Open in Google Maps button.
-                ElevatedButton(
-                  onPressed: _openInGoogleMaps,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.deepOrange,
-                    foregroundColor: Colors.white,
-                  ),
-                  child: const Text("Open in Google Maps"),
-                ),
-                const SizedBox(width: 8),
-                // Vertical divider.
-                Container(
-                  height: 40,
-                  width: 1,
-                  color: Colors.grey,
-                ),
-                const SizedBox(width: 12),
-                // Radius slider & text input.
-                _buildRadiusControl(),
-              ],
+              ),
             ),
           ),
           // Grid: Two rows of three panels each.
@@ -1624,8 +1630,7 @@ class MapViewState extends State<MapView> {
     
     if (widget.mode == MapViewMode.oldTaz) {
       return "${widget.title}\nTAZ: ${widget.selectedTazId ?? 'None'}";
-    }
-    else {
+    } else {
       return widget.title;
     }
   }
