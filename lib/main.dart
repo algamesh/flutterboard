@@ -100,6 +100,65 @@ SymbolLayerProperties createIdLabelProperties({
   );
 }
 
+/// Helper: Format a numeric value with at most one decimal if needed.
+/// If the number has no fractional part, no decimal is shown.
+String formatNumber(num value) {
+  if (value is int || value % 1 == 0) return value.toString();
+  return value.toStringAsFixed(1);
+}
+
+/// Helper: Build a DataCell from a value. If the value is numeric, it is formatted.
+DataCell buildDataCell(dynamic value) {
+  if (value is num) {
+    return DataCell(Text(formatNumber(value)));
+  }
+  return DataCell(Text(value.toString()));
+}
+
+/// Helper: Filter features by computing the centroid distance from a given center.
+/// Returns only those features with a centroid distance <= radiusKm.
+List<dynamic> filterFeaturesWithinDistance(
+    List<dynamic> features, turf.Point center, double radiusKm) {
+  List<dynamic> filtered = [];
+  for (var feature in features) {
+    final turf.Feature f = turf.Feature.fromJson(feature);
+    final centroidFeature = turf.centroid(f);
+    final turf.Point centroid = centroidFeature.geometry as turf.Point;
+    double distance =
+        (turf.distance(center, centroid, turf.Unit.kilometers) as num)
+            .toDouble();
+    if (distance <= radiusKm) {
+      filtered.add(feature);
+    }
+  }
+  return filtered;
+}
+
+/// Helper: Check if a point is within a given bounding box and within a given distance (km) from center.
+bool isWithinBBoxAndDistance(
+    turf.Point point, math.Rectangle<double> bbox, turf.Point center, double radiusKm) {
+  double lng = (point.coordinates[0] as num).toDouble();
+  double lat = (point.coordinates[1] as num).toDouble();
+  if (lng < bbox.left ||
+      lng > bbox.left + bbox.width ||
+      lat < bbox.top ||
+      lat > bbox.top + bbox.height) {
+    return false;
+  }
+  double distance =
+      (turf.distance(center, point, turf.Unit.kilometers) as num).toDouble();
+  return distance <= radiusKm;
+}
+
+/// Helper: Load and standardize a GeoJSON file from localStorage.
+Map<String, dynamic>? _loadGeoJsonFromLocal(String key, String type) {
+  if (html.window.localStorage.containsKey(key)) {
+    var geojson = jsonDecode(html.window.localStorage[key]!);
+    return standardizeGeoJsonProperties(geojson, type);
+  }
+  return null;
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   if (kIsWeb) {
@@ -287,21 +346,12 @@ class _DashboardPageState extends State<DashboardPage> {
     
   Future<void> _loadCachedData() async {
     // Only update the in-memory cache if it's null.
-    if (_cachedOldTaz == null && html.window.localStorage.containsKey('old_taz_geojson')) {
-      _cachedOldTaz = jsonDecode(html.window.localStorage['old_taz_geojson']!);
-      _cachedOldTaz = standardizeGeoJsonProperties(_cachedOldTaz!, "old_taz");
-      _uploadedOldTaz = true;
-    }
-    if (_cachedNewTaz == null && html.window.localStorage.containsKey('new_taz_geojson')) {
-      _cachedNewTaz = jsonDecode(html.window.localStorage['new_taz_geojson']!);
-      _cachedNewTaz = standardizeGeoJsonProperties(_cachedNewTaz!, "new_taz");
-      _uploadedNewTaz = true;
-    }
-    if (_cachedBlocks == null && html.window.localStorage.containsKey('blocks_geojson')) {
-      _cachedBlocks = jsonDecode(html.window.localStorage['blocks_geojson']!);
-      _cachedBlocks = standardizeGeoJsonProperties(_cachedBlocks!, "blocks");
-      _uploadedBlocks = true;
-    }
+    _cachedOldTaz ??= _loadGeoJsonFromLocal('old_taz_geojson', "old_taz");
+    if (_cachedOldTaz != null) _uploadedOldTaz = true;
+    _cachedNewTaz ??= _loadGeoJsonFromLocal('new_taz_geojson', "new_taz");
+    if (_cachedNewTaz != null) _uploadedNewTaz = true;
+    _cachedBlocks ??= _loadGeoJsonFromLocal('blocks_geojson', "blocks");
+    if (_cachedBlocks != null) _uploadedBlocks = true;
 
     // Build the R-Tree index for blocks if available.
     if (_cachedBlocks != null && _cachedBlocks!['features'] != null) {
@@ -726,111 +776,107 @@ class _DashboardPageState extends State<DashboardPage> {
         ),
         centerTitle: true,
         iconTheme: const IconThemeData(color: Colors.white),
+        // Wrap actions in a SingleChildScrollView to prevent overflow on narrow windows.
         actions: [
-          // Conversion toggle with styled container.
-          Container(
-            height: 40,
-            margin: const EdgeInsets.symmetric(horizontal: 8),
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              border: Border.all(color: const Color(0xFF3E2723), width: 2),
-              borderRadius: BorderRadius.circular(8),
-            ),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
             child: Row(
-              mainAxisSize: MainAxisSize.min,
               children: [
-                Text("Miles", style: TextStyle(color: const Color(0xFF3E2723))),
-                Switch(
-                  value: _useKilometers,
-                  onChanged: (value) {
-                    setState(() {
-                      _useKilometers = value;
-                      _radius = _radiusValue * (_useKilometers ? 1000 : 1609.34);
-                    });
-                  },
-                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  activeColor: const Color(0xFF3E2723),
-                  inactiveThumbColor: const Color(0xFF3E2723),
-                  inactiveTrackColor: const Color(0xFF3E2723).withOpacity(0.3),
+                // Conversion toggle with styled container.
+                Container(
+                  height: 40,
+                  margin: const EdgeInsets.symmetric(horizontal: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    border: Border.all(color: const Color(0xFF3E2723), width: 2),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text("Miles", style: TextStyle(color: const Color(0xFF3E2723))),
+                      Switch(
+                        value: _useKilometers,
+                        onChanged: (value) {
+                          setState(() {
+                            _useKilometers = value;
+                            _radius = _radiusValue * (_useKilometers ? 1000 : 1609.34);
+                          });
+                        },
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        activeColor: const Color(0xFF3E2723),
+                        inactiveThumbColor: const Color(0xFF3E2723),
+                        inactiveTrackColor: const Color(0xFF3E2723).withOpacity(0.3),
+                      ),
+                      Text("KM", style: TextStyle(color: const Color(0xFF3E2723))),
+                    ],
+                  ),
                 ),
-                Text("KM", style: TextStyle(color: const Color(0xFF3E2723))),
+                // ID Labels toggle.
+                Container(
+                  height: 40,
+                  margin: const EdgeInsets.symmetric(horizontal: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    border: Border.all(color: const Color(0xFF3E2723), width: 2),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text("ID Labels", style: TextStyle(color: const Color(0xFF3E2723))),
+                      Switch(
+                        value: _showIdLabels,
+                        onChanged: (value) {
+                          setState(() {
+                            _showIdLabels = value;
+                          });
+                        },
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        activeColor: const Color(0xFF3E2723),
+                        inactiveThumbColor: const Color(0xFF3E2723),
+                        inactiveTrackColor: const Color(0xFF3E2723).withOpacity(0.3),
+                      ),
+                    ],
+                  ),
+                ),
+                // Map style drop-down.
+                Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    border: Border.all(color: const Color(0xFF3E2723), width: 2),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 80),
+                    child: DropdownButton<String>(
+                      isDense: true,
+                      value: _selectedMapStyleName,
+                      icon: const Icon(Icons.keyboard_arrow_down, color: Color(0xFF3E2723)),
+                      dropdownColor: Colors.white,
+                      style: const TextStyle(color: Color(0xFF3E2723), fontWeight: FontWeight.bold),
+                      underline: const SizedBox(),
+                      onChanged: (newValue) {
+                        setState(() {
+                          _selectedMapStyleName = newValue!;
+                        });
+                      },
+                      items: _mapStyles.keys.map((styleName) {
+                        return DropdownMenuItem<String>(
+                          value: styleName,
+                          child: Text(styleName),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
-          // ID Labels toggle.
-          Container(
-            height: 40,
-            margin: const EdgeInsets.symmetric(horizontal: 8),
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              border: Border.all(color: const Color(0xFF3E2723), width: 2),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text("ID Labels", style: TextStyle(color: const Color(0xFF3E2723))),
-                Switch(
-                  value: _showIdLabels,
-                  onChanged: (value) {
-                    setState(() {
-                      _showIdLabels = value;
-                    });
-                  },
-                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  activeColor: const Color(0xFF3E2723),
-                  inactiveThumbColor: const Color(0xFF3E2723),
-                  inactiveTrackColor: const Color(0xFF3E2723).withOpacity(0.3),
-                ),
-              ],
-            ),
-          ),
-          // Map style drop-down.
-          Container(
-            margin: const EdgeInsets.symmetric(horizontal: 8),
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              border: Border.all(color: const Color(0xFF3E2723), width: 2),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 80),
-              child: DropdownButton<String>(
-                isDense: true,
-                value: _selectedMapStyleName,
-                icon: const Icon(Icons.keyboard_arrow_down, color: Color(0xFF3E2723)),
-                dropdownColor: Colors.white,
-                style: const TextStyle(color: Color(0xFF3E2723), fontWeight: FontWeight.bold),
-                underline: const SizedBox(),
-                onChanged: (newValue) {
-                  setState(() {
-                    _selectedMapStyleName = newValue!;
-                  });
-                },
-                items: _mapStyles.keys.map((styleName) {
-                  return DropdownMenuItem<String>(
-                    value: styleName,
-                    child: Text(styleName),
-                  );
-                }).toList(),
-              ),
-            ),
-          ),
-          // // Settings button.
-          // Container(
-          //   margin: const EdgeInsets.only(right: 16.0),
-          //   decoration: const BoxDecoration(
-          //     shape: BoxShape.circle,
-          //     color: Colors.white,
-          //   ),
-          //   child: IconButton(
-          //     icon: const Icon(Icons.settings, color: Colors.blue),
-          //     onPressed: () => _goToConfigPage(context),
-          //   ),
-          // ),
         ],
       ),
       // Main layout: Grid with two rows and three equally wide panels.
@@ -1056,15 +1102,15 @@ class _DashboardPageState extends State<DashboardPage> {
                                             if (_newTazTableData.isNotEmpty) {
                                               rows.addAll(_newTazTableData.map((row) {
                                                 return DataRow(cells: [
-                                                  DataCell(Text("${row['id']}")),
-                                                  DataCell(Text("${row['hh19']}")),
-                                                  DataCell(Text("${row['hh49']}")),
-                                                  DataCell(Text("${row['emp19']}")),
-                                                  DataCell(Text("${row['emp49']}")),
-                                                  DataCell(Text("${row['persns19']}")),
-                                                  DataCell(Text("${row['persns49']}")),
-                                                  DataCell(Text("${row['workrs19']}")),
-                                                  DataCell(Text("${row['workrs49']}")),
+                                                  buildDataCell(row['id']),
+                                                  buildDataCell(row['hh19']),
+                                                  buildDataCell(row['hh49']),
+                                                  buildDataCell(row['emp19']),
+                                                  buildDataCell(row['emp49']),
+                                                  buildDataCell(row['persns19']),
+                                                  buildDataCell(row['persns49']),
+                                                  buildDataCell(row['workrs19']),
+                                                  buildDataCell(row['workrs49']),
                                                 ]);
                                               }).toList());
                                             } else {
@@ -1094,14 +1140,14 @@ class _DashboardPageState extends State<DashboardPage> {
                                               color: MaterialStateProperty.all(Colors.grey[300]),
                                               cells: [
                                                 const DataCell(Text("Total", style: TextStyle(fontWeight: FontWeight.bold))),
-                                                DataCell(Text("$sumHH19", style: const TextStyle(fontWeight: FontWeight.bold))),
-                                                DataCell(Text("$sumHH49", style: const TextStyle(fontWeight: FontWeight.bold))),
-                                                DataCell(Text("$sumEMP19", style: const TextStyle(fontWeight: FontWeight.bold))),
-                                                DataCell(Text("$sumEMP49", style: const TextStyle(fontWeight: FontWeight.bold))),
-                                                DataCell(Text("$sumPERSNS19", style: const TextStyle(fontWeight: FontWeight.bold))),
-                                                DataCell(Text("$sumPERSNS49", style: const TextStyle(fontWeight: FontWeight.bold))),
-                                                DataCell(Text("$sumWORKRS19", style: const TextStyle(fontWeight: FontWeight.bold))),
-                                                DataCell(Text("$sumWORKRS49", style: const TextStyle(fontWeight: FontWeight.bold))),
+                                                buildDataCell(sumHH19),
+                                                buildDataCell(sumHH49),
+                                                buildDataCell(sumEMP19),
+                                                buildDataCell(sumEMP49),
+                                                buildDataCell(sumPERSNS19),
+                                                buildDataCell(sumPERSNS49),
+                                                buildDataCell(sumWORKRS19),
+                                                buildDataCell(sumWORKRS49),
                                               ],
                                             ));
                                             return rows;
@@ -1251,15 +1297,15 @@ class _DashboardPageState extends State<DashboardPage> {
                                             if (_blocksTableData.isNotEmpty) {
                                               rows.addAll(_blocksTableData.map((row) {
                                                 return DataRow(cells: [
-                                                  DataCell(Text("${row['id']}")),
-                                                  DataCell(Text("${row['hh19']}")),
-                                                  DataCell(Text("${row['hh49']}")),
-                                                  DataCell(Text("${row['emp19']}")),
-                                                  DataCell(Text("${row['emp49']}")),
-                                                  DataCell(Text("${row['persns19']}")),
-                                                  DataCell(Text("${row['persns49']}")),
-                                                  DataCell(Text("${row['workrs19']}")),
-                                                  DataCell(Text("${row['workrs49']}")),
+                                                  buildDataCell(row['id']),
+                                                  buildDataCell(row['hh19']),
+                                                  buildDataCell(row['hh49']),
+                                                  buildDataCell(row['emp19']),
+                                                  buildDataCell(row['emp49']),
+                                                  buildDataCell(row['persns19']),
+                                                  buildDataCell(row['persns49']),
+                                                  buildDataCell(row['workrs19']),
+                                                  buildDataCell(row['workrs49']),
                                                 ]);
                                               }).toList());
                                             } else {
@@ -1288,14 +1334,14 @@ class _DashboardPageState extends State<DashboardPage> {
                                               color: MaterialStateProperty.all(Colors.grey[300]),
                                               cells: [
                                                 const DataCell(Text("Total", style: TextStyle(fontWeight: FontWeight.bold))),
-                                                DataCell(Text(sumHH19.toString(), style: const TextStyle(fontWeight: FontWeight.bold))),
-                                                DataCell(Text(sumHH49.toString(), style: const TextStyle(fontWeight: FontWeight.bold))),
-                                                DataCell(Text(sumEMP19.toString(), style: const TextStyle(fontWeight: FontWeight.bold))),
-                                                DataCell(Text(sumEMP49.toString(), style: const TextStyle(fontWeight: FontWeight.bold))),
-                                                DataCell(Text(sumPERSNS19.toString(), style: const TextStyle(fontWeight: FontWeight.bold))),
-                                                DataCell(Text(sumPERSNS49.toString(), style: const TextStyle(fontWeight: FontWeight.bold))),
-                                                DataCell(Text(sumWORKRS19.toString(), style: const TextStyle(fontWeight: FontWeight.bold))),
-                                                DataCell(Text(sumWORKRS49.toString(), style: const TextStyle(fontWeight: FontWeight.bold))),
+                                                buildDataCell(sumHH19),
+                                                buildDataCell(sumHH49),
+                                                buildDataCell(sumEMP19),
+                                                buildDataCell(sumEMP49),
+                                                buildDataCell(sumPERSNS19),
+                                                buildDataCell(sumPERSNS49),
+                                                buildDataCell(sumWORKRS19),
+                                                buildDataCell(sumWORKRS49),
                                               ],
                                             ));
                                             return rows;
@@ -1748,18 +1794,9 @@ class MapViewState extends State<MapView> {
     final turf.Point targetCentroid =
         targetCentroidFeature.geometry as turf.Point;
     double radiusKm = widget.radius! / 1000;
-    List<dynamic> withinFeatures = [];
-    for (var feature in allFeatures) {
-      final turf.Feature f = turf.Feature.fromJson(feature);
-      final centroidFeature = turf.centroid(f);
-      final turf.Point centroid = centroidFeature.geometry as turf.Point;
-      double distance =
-          (turf.distance(targetCentroid, centroid, turf.Unit.kilometers) as num)
-              .toDouble();
-      if (distance <= radiusKm) {
-        withinFeatures.add(feature);
-      }
-    }
+    // Use helper to filter features within the given radius.
+    List<dynamic> withinFeatures =
+        filterFeaturesWithinDistance(allFeatures, targetCentroid, radiusKm);
 
     List<dynamic> targetFeatures = withinFeatures.where((f) {
       final props = f['properties'] as Map<String, dynamic>;
@@ -1845,16 +1882,9 @@ class MapViewState extends State<MapView> {
     }
     final List<dynamic> newFeatures = newTazData['features'] as List<dynamic>;
 
-    // Filter new TAZ features by distance to the old TAZ centroid.
-    final filteredNewFeatures = newFeatures.where((feature) {
-      final turf.Feature newTazFeature = turf.Feature.fromJson(feature);
-      final newCentroidFeature = turf.centroid(newTazFeature);
-      final turf.Point newCentroid = newCentroidFeature.geometry as turf.Point;
-      double distance =
-          (turf.distance(oldCentroid, newCentroid, turf.Unit.kilometers) as num)
-              .toDouble();
-      return distance <= radiusKm;
-    }).toList();
+    // Use helper to filter new TAZ features by distance from oldCentroid.
+    final filteredNewFeatures =
+        filterFeaturesWithinDistance(newFeatures, oldCentroid, radiusKm);
 
     if (filteredNewFeatures.isEmpty) {
       debugPrint("No new TAZ features within the radius.");
@@ -1962,18 +1992,7 @@ class MapViewState extends State<MapView> {
       final blockCentroidFeature = turf.centroid(blockFeature);
       final turf.Point blockCentroid =
           blockCentroidFeature.geometry as turf.Point;
-      final double blockLng = (blockCentroid.coordinates[0]!).toDouble();
-      final double blockLat = (blockCentroid.coordinates[1]!).toDouble();
-      if (blockLng < circleBBox.left ||
-          blockLng > circleBBox.left + circleBBox.width ||
-          blockLat < circleBBox.top ||
-          blockLat > circleBBox.top + circleBBox.height) {
-        return false;
-      }
-      double distance = (turf.distance(
-              oldCentroid, blockCentroid, turf.Unit.kilometers) as num)
-          .toDouble();
-      return distance <= radiusKm;
+      return isWithinBBoxAndDistance(blockCentroid, circleBBox, oldCentroid, radiusKm);
     }).toList();
     if (filteredBlocks.isEmpty) {
       debugPrint("No blocks within the radius.");
