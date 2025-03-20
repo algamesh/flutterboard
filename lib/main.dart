@@ -1,11 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:html' as html; // For web injection.
+import 'dart:html' as html; // For web injection and file upload.
 import 'dart:math' show Point;
 import 'dart:math' as math; // For math calculations.
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show rootBundle;
 import 'package:maplibre_gl/maplibre_gl.dart';
 import 'package:turf/turf.dart' as turf;
 import 'package:r_tree/r_tree.dart';
@@ -40,13 +39,7 @@ Map<String, dynamic> createCirclePolygon(turf.Point center, double radius,
   };
 }
 
-/// Shared function to load GeoJSON data.
-Future<Map<String, dynamic>> loadGeoJson(String path) async {
-  final str = await rootBundle.loadString(path);
-  return jsonDecode(str) as Map<String, dynamic>;
-}
-
-/// Standardizes property names for each GeoJSON type.
+/// Shared function to standardize property names for each GeoJSON type.
 Map<String, dynamic> standardizeGeoJsonProperties(
     Map<String, dynamic> geojson, String featureType) {
   if (geojson['features'] is List) {
@@ -88,6 +81,82 @@ Map<String, dynamic> standardizeGeoJsonProperties(
     }
   }
   return geojson;
+}
+
+/// Helper function to create consistent SymbolLayerProperties for ID labels.
+SymbolLayerProperties createIdLabelProperties({
+  required String textField,
+  required String textColor,
+  double textSize = 14,
+  String textHaloColor = "#FFFFFF",
+  double textHaloWidth = 0.5,
+}) {
+  return SymbolLayerProperties(
+    textField: textField,
+    textSize: textSize,
+    textColor: textColor,
+    textHaloColor: textHaloColor,
+    textHaloWidth: textHaloWidth,
+  );
+}
+
+/// Helper: Format a numeric value with at most one decimal if needed.
+/// If the number has no fractional part, no decimal is shown.
+String formatNumber(num value) {
+  if (value is int || value % 1 == 0) return value.toString();
+  return value.toStringAsFixed(1);
+}
+
+/// Helper: Build a DataCell from a value. If the value is numeric, it is formatted.
+DataCell buildDataCell(dynamic value) {
+  if (value is num) {
+    return DataCell(Text(formatNumber(value)));
+  }
+  return DataCell(Text(value.toString()));
+}
+
+/// Helper: Filter features by computing the centroid distance from a given center.
+/// Returns only those features with a centroid distance <= radiusKm.
+List<dynamic> filterFeaturesWithinDistance(
+    List<dynamic> features, turf.Point center, double radiusKm) {
+  List<dynamic> filtered = [];
+  for (var feature in features) {
+    final turf.Feature f = turf.Feature.fromJson(feature);
+    final centroidFeature = turf.centroid(f);
+    final turf.Point centroid = centroidFeature.geometry as turf.Point;
+    double distance =
+        (turf.distance(center, centroid, turf.Unit.kilometers) as num)
+            .toDouble();
+    if (distance <= radiusKm) {
+      filtered.add(feature);
+    }
+  }
+  return filtered;
+}
+
+/// Helper: Check if a point is within a given bounding box and within a given distance (km) from center.
+bool isWithinBBoxAndDistance(
+    turf.Point point, math.Rectangle<double> bbox, turf.Point center, double radiusKm) {
+  double lng = (point.coordinates[0] as num).toDouble();
+  double lat = (point.coordinates[1] as num).toDouble();
+  if (lng < bbox.left ||
+      lng > bbox.left + bbox.width ||
+      lat < bbox.top ||
+      lat > bbox.top + bbox.height) {
+    return false;
+  }
+  double distance =
+      (turf.distance(center, point, turf.Unit.kilometers) as num).toDouble();
+  return distance <= radiusKm;
+}
+
+/// Helper: Load and standardize a GeoJSON file from localStorage.
+Map<String, dynamic>? _loadGeoJsonFromLocal(String key, String type) {
+  if (html.window.localStorage.containsKey(key)) {
+    var geojson = jsonDecode(html.window.localStorage[key]!);
+    return standardizeGeoJsonProperties(geojson, type);
+  }
+  return null;
 }
 
 Future<void> main() async {
@@ -158,6 +227,8 @@ class DashboardPage extends StatefulWidget {
 }
 
 class _DashboardPageState extends State<DashboardPage> {
+  bool _isLoading = true;
+
   // Input controllers.
   final TextEditingController _searchController = TextEditingController();
   // Updated radius controller starts with "1.0" (representing 1.0 mile or km)
@@ -196,6 +267,7 @@ class _DashboardPageState extends State<DashboardPage> {
 {
   "version": 8,
   "name": "ArcGIS Satellite",
+  "glyphs": "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
   "sources": {
     "satellite-source": {
       "type": "raster",
@@ -233,32 +305,56 @@ class _DashboardPageState extends State<DashboardPage> {
   final GlobalKey<MapViewState> _combinedMapKey = GlobalKey<MapViewState>();
   final GlobalKey<MapViewState> _blocksMapKey = GlobalKey<MapViewState>();
 
+  // Scroll controllers for horizontal scrolling in tables.
+  final ScrollController _newTableHorizontalScrollController = ScrollController();
+  final ScrollController _blocksTableHorizontalScrollController = ScrollController();
+
+  // New booleans to track whether each file has been uploaded.
+  bool _uploadedOldTaz = false;
+  bool _uploadedNewTaz = false;
+  bool _uploadedBlocks = false;
+
+  // New flags to indicate overall file readiness and if a file is currently processing.
+  bool _filesReady = false;
+  bool _isProcessingUpload = false;
+
   @override
   void initState() {
     super.initState();
-    // Initialize with TAZ 12 searched.
-    _searchController.text = "12";
-    _runSearch();
-    _loadCachedData();
+    // Check if all three files already exist in local storage.
+    bool allUploaded = html.window.localStorage.containsKey('old_taz_geojson') &&
+        html.window.localStorage.containsKey('new_taz_geojson') &&
+        html.window.localStorage.containsKey('blocks_geojson');
+    if (allUploaded) {
+      _filesReady = true;
+      _loadCachedData().then((_) {
+        setState(() {
+          _isLoading = false;
+        });
+      });
+    } else {
+      // Do not load main dashboard until all files are uploaded.
+      _isLoading = false;
+    }
   }
-
-  /// Load and preprocess all GeoJSON, plus build spatial index for blocks.
+  
+  @override
+  void dispose() {
+    _newTableHorizontalScrollController.dispose();
+    _blocksTableHorizontalScrollController.dispose();
+    super.dispose();
+  }
+    
   Future<void> _loadCachedData() async {
-    _cachedOldTaz = await loadGeoJson('assets/geojsons/old_taz.geojson');
-    _cachedNewTaz = await loadGeoJson('assets/geojsons/new_taz.geojson');
-    _cachedBlocks = await loadGeoJson('assets/geojsons/blocks.geojson');
+    // Only update the in-memory cache if it's null.
+    _cachedOldTaz ??= _loadGeoJsonFromLocal('old_taz_geojson', "old_taz");
+    if (_cachedOldTaz != null) _uploadedOldTaz = true;
+    _cachedNewTaz ??= _loadGeoJsonFromLocal('new_taz_geojson', "new_taz");
+    if (_cachedNewTaz != null) _uploadedNewTaz = true;
+    _cachedBlocks ??= _loadGeoJsonFromLocal('blocks_geojson', "blocks");
+    if (_cachedBlocks != null) _uploadedBlocks = true;
 
-    if (_cachedOldTaz != null) {
-      _cachedOldTaz = standardizeGeoJsonProperties(_cachedOldTaz!, "old_taz");
-    }
-    if (_cachedNewTaz != null) {
-      _cachedNewTaz = standardizeGeoJsonProperties(_cachedNewTaz!, "new_taz");
-    }
-    if (_cachedBlocks != null) {
-      _cachedBlocks = standardizeGeoJsonProperties(_cachedBlocks!, "blocks");
-    }
-
-    // Build an R-Tree index for blocks.
+    // Build the R-Tree index for blocks if available.
     if (_cachedBlocks != null && _cachedBlocks!['features'] != null) {
       List<RTreeDatum<dynamic>> items = [];
       for (var feature in _cachedBlocks!['features']) {
@@ -339,10 +435,9 @@ class _DashboardPageState extends State<DashboardPage> {
       _searchLabel = "Currently Searching TAZ: $tazId";
       _hasSearched = true;
       _selectedTazId = tazId;
-      // Clear the data tables:
+      // Clear the data tables and selected highlights.
       _newTazTableData.clear();
       _blocksTableData.clear();
-      // Clear the selected highlights:
       _selectedNewTazIds.clear();
       _selectedBlockIds.clear();
     });
@@ -376,13 +471,13 @@ class _DashboardPageState extends State<DashboardPage> {
       Map<String, dynamic> newRow = {
         'id': tappedId,
         'hh19': 0,
-        'persns19': 0,
-        'workrs19': 0,
-        'emp19': 0,
         'hh49': 0,
-        'persns49': 0,
-        'workrs49': 0,
+        'emp19': 0,
         'emp49': 0,
+        'persns19': 0,
+        'persns49': 0,
+        'workrs19': 0,
+        'workrs49': 0,
       };
       if (_cachedNewTaz != null && _cachedNewTaz!['features'] != null) {
         List<dynamic> features = _cachedNewTaz!['features'];
@@ -395,13 +490,13 @@ class _DashboardPageState extends State<DashboardPage> {
           newRow = {
             'id': tappedId,
             'hh19': props['hh19'] ?? 0,
-            'persns19': props['persns19'] ?? 0,
-            'workrs19': props['workrs19'] ?? 0,
-            'emp19': props['emp19'] ?? 0,
             'hh49': props['hh49'] ?? 0,
-            'persns49': props['persns49'] ?? 0,
-            'workrs49': props['workrs49'] ?? 0,
+            'emp19': props['emp19'] ?? 0,
             'emp49': props['emp49'] ?? 0,
+            'persns19': props['persns19'] ?? 0,
+            'persns49': props['persns49'] ?? 0,
+            'workrs19': props['workrs19'] ?? 0,
+            'workrs49': props['workrs49'] ?? 0,
           };
         }
       }
@@ -423,19 +518,18 @@ class _DashboardPageState extends State<DashboardPage> {
         Map<String, dynamic> newRow = {
           'id': tappedId,
           'hh19': 0,
-          'persns19': 0,
-          'workrs19': 0,
-          'emp19': 0,
           'hh49': 0,
-          'persns49': 0,
-          'workrs49': 0,
+          'emp19': 0,
           'emp49': 0,
+          'persns19': 0,
+          'persns49': 0,
+          'workrs19': 0,
+          'workrs49': 0,
         };
         if (_cachedBlocks != null && _cachedBlocks!['features'] != null) {
           List<dynamic> features = _cachedBlocks!['features'];
           var matchingFeature = features.firstWhere(
-            (f) =>
-                f['properties']?['geoid20'].toString() == tappedId.toString(),
+            (f) => f['properties']?['geoid20'].toString() == tappedId.toString(),
             orElse: () => null,
           );
           if (matchingFeature != null) {
@@ -443,13 +537,13 @@ class _DashboardPageState extends State<DashboardPage> {
             newRow = {
               'id': tappedId,
               'hh19': props['hh19'] ?? 0,
-              'persns19': props['persns19'] ?? 0,
-              'workrs19': props['workrs19'] ?? 0,
-              'emp19': props['emp19'] ?? 0,
               'hh49': props['hh49'] ?? 0,
-              'persns49': props['persns49'] ?? 0,
-              'workrs49': props['workrs49'] ?? 0,
+              'emp19': props['emp19'] ?? 0,
               'emp49': props['emp49'] ?? 0,
+              'persns19': props['persns19'] ?? 0,
+              'persns49': props['persns49'] ?? 0,
+              'workrs19': props['workrs19'] ?? 0,
+              'workrs49': props['workrs49'] ?? 0,
             };
           }
         }
@@ -460,7 +554,6 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   /// Builds the slider + text input used to set the search radius.
-  /// (Conversion toggle removed from here since it now appears in the App Bar.)
   Widget _buildRadiusControl() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8.0),
@@ -478,7 +571,7 @@ class _DashboardPageState extends State<DashboardPage> {
               ),
               child: Slider(
                 min: 0.5,
-                max: 3.0,
+                max: 5.0,
                 divisions: 5,
                 label: _radiusValue.toStringAsFixed(1),
                 value: _radiusValue,
@@ -508,7 +601,7 @@ class _DashboardPageState extends State<DashboardPage> {
                 double? newVal = double.tryParse(_radiusController.text);
                 if (newVal == null) newVal = 0.5;
                 if (newVal < 0.5) newVal = 0.5;
-                if (newVal > 3.0) newVal = 3.0;
+                if (newVal > 5.0) newVal = 5.0;
                 setState(() {
                   _radiusValue = newVal!;
                   _radius = _radiusValue * (_useKilometers ? 1000 : 1609.34);
@@ -561,754 +654,712 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
+  String? _oldTazFileName;
+  String? _newTazFileName;
+  String? _blocksFileName;
+
+  void _uploadGeoJson(String type) {
+    final input = html.FileUploadInputElement()..accept = '.geojson';
+    input.click();
+    input.onChange.listen((event) async {
+      if (input.files!.isNotEmpty) {
+        setState(() {
+          _isProcessingUpload = true;
+        });
+        final file = input.files!.first;
+        // Optionally check file size (in bytes)
+        if (file.size > 5 * 1024 * 1024) { // 5MB threshold
+          debugPrint("File is too large to cache in localStorage; processing in-memory only.");
+        }
+        final reader = html.FileReader();
+        reader.readAsText(file);
+        await reader.onLoad.first;
+        Map<String, dynamic> geojsonData =
+            jsonDecode(reader.result as String) as Map<String, dynamic>;
+        
+        // Standardize property names: convert all keys to lowercase (and apply renaming logic)
+        geojsonData = standardizeGeoJsonProperties(geojsonData, type);
+        
+        // If the file is small enough, cache it in localStorage.
+        if (file.size <= 5 * 1024 * 1024) {
+          if (type == "old_taz") {
+            html.window.localStorage['old_taz_geojson'] = jsonEncode(geojsonData);
+          } else if (type == "new_taz") {
+            html.window.localStorage['new_taz_geojson'] = jsonEncode(geojsonData);
+          } else if (type == "blocks") {
+            html.window.localStorage['blocks_geojson'] = jsonEncode(geojsonData);
+          }
+        }
+        // In any case, store it in our in-memory cache and update the file name.
+        if (type == "old_taz") {
+          _uploadedOldTaz = true;
+          _cachedOldTaz = geojsonData;
+          _oldTazFileName = file.name;
+        } else if (type == "new_taz") {
+          _uploadedNewTaz = true;
+          _cachedNewTaz = geojsonData;
+          _newTazFileName = file.name;
+        } else if (type == "blocks") {
+          _uploadedBlocks = true;
+          _cachedBlocks = geojsonData;
+          _blocksFileName = file.name;
+        }
+        setState(() {
+          _isProcessingUpload = false;
+        });
+        if (_uploadedOldTaz && _uploadedNewTaz && _uploadedBlocks) {
+          setState(() {
+            _filesReady = true;
+            _isLoading = true;
+          });
+          await _loadCachedData();
+          setState(() {
+            _isLoading = false;
+          });
+        }
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
+    // While a file is being processed, show a loading screen.
+    if (_isLoading) {
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text("VizTAZ Dashboard"),
+          backgroundColor: const Color(0xFF013220), // Dark green.
+          leadingWidth: 150,
+          leading: _buildUploadButtons(),
+        ),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    // If files are not yet ready, show a waiting screen.
+    if (!_filesReady) {
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text(
+            "Upload Required",
+            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+          ),
+          backgroundColor: const Color(0xFF013220), // Very dark green for the AppBar.
+          leadingWidth: 150,
+          leading: _buildUploadButtons(),
+        ),
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Text("Please upload all three GeoJSON files to continue."),
+              if (_isProcessingUpload)
+                const Padding(
+                  padding: EdgeInsets.all(16.0),
+                  child: CircularProgressIndicator(),
+                )
+            ],
+          ),
+        ),
+      );
+    }
+
+    // Main dashboard once files are ready.
     return Scaffold(
-      // Set the AppBar background to a very dark green.
       appBar: AppBar(
-        backgroundColor:
-            const Color(0xFF013220), // Very dark green for the AppBar.
+        backgroundColor: const Color(0xFF013220), // Very dark green for the AppBar.
         elevation: 2,
+        leadingWidth: 150,
+        leading: _buildUploadButtons(),
         title: Text(
           _searchLabel,
-          style:
-              const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
-
         centerTitle: true,
         iconTheme: const IconThemeData(color: Colors.white),
+        // Wrap actions in a SingleChildScrollView to prevent overflow on narrow windows.
         actions: [
-          // Conversion toggle with white background and very dark brown boundaries/text.
-          Container(
-            height: 40,
-            margin: const EdgeInsets.symmetric(horizontal: 8),
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              border: Border.all(color: const Color(0xFF3E2723), width: 2),
-              borderRadius: BorderRadius.circular(8),
-            ),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
             child: Row(
-              mainAxisSize: MainAxisSize.min,
               children: [
-                Text("Miles", style: TextStyle(color: const Color(0xFF3E2723))),
-                Switch(
-                  value: _useKilometers,
-                  onChanged: (value) {
-                    setState(() {
-                      _useKilometers = value;
-                      _radius =
-                          _radiusValue * (_useKilometers ? 1000 : 1609.34);
-                    });
-                  },
-                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  activeColor: const Color(0xFF3E2723),
-                  inactiveThumbColor: const Color(0xFF3E2723),
-                  inactiveTrackColor: const Color(0xFF3E2723).withOpacity(0.3),
+                // Conversion toggle with styled container.
+                Container(
+                  height: 40,
+                  margin: const EdgeInsets.symmetric(horizontal: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    border: Border.all(color: const Color(0xFF3E2723), width: 2),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text("Miles", style: TextStyle(color: const Color(0xFF3E2723))),
+                      Switch(
+                        value: _useKilometers,
+                        onChanged: (value) {
+                          setState(() {
+                            _useKilometers = value;
+                            _radius = _radiusValue * (_useKilometers ? 1000 : 1609.34);
+                          });
+                        },
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        activeColor: const Color(0xFF3E2723),
+                        inactiveThumbColor: const Color(0xFF3E2723),
+                        inactiveTrackColor: const Color(0xFF3E2723).withOpacity(0.3),
+                      ),
+                      Text("KM", style: TextStyle(color: const Color(0xFF3E2723))),
+                    ],
+                  ),
                 ),
-                Text("KM", style: TextStyle(color: const Color(0xFF3E2723))),
-              ],
-            ),
-          ),
-          // ID Labels toggle with same white background and very dark brown styling.
-          Container(
-            height: 40,
-            margin: const EdgeInsets.symmetric(horizontal: 8),
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              border: Border.all(color: const Color(0xFF3E2723), width: 2),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text("ID Labels",
-                    style: TextStyle(color: const Color(0xFF3E2723))),
-                Switch(
-                  value: _showIdLabels,
-                  onChanged: (value) {
-                    setState(() {
-                      _showIdLabels = value;
-                    });
-                  },
-                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  activeColor: const Color(0xFF3E2723),
-                  inactiveThumbColor: const Color(0xFF3E2723),
-                  inactiveTrackColor: const Color(0xFF3E2723).withOpacity(0.3),
+                // ID Labels toggle.
+                Container(
+                  height: 40,
+                  margin: const EdgeInsets.symmetric(horizontal: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    border: Border.all(color: const Color(0xFF3E2723), width: 2),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text("ID Labels", style: TextStyle(color: const Color(0xFF3E2723))),
+                      Switch(
+                        value: _showIdLabels,
+                        onChanged: (value) {
+                          setState(() {
+                            _showIdLabels = value;
+                          });
+                        },
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        activeColor: const Color(0xFF3E2723),
+                        inactiveThumbColor: const Color(0xFF3E2723),
+                        inactiveTrackColor: const Color(0xFF3E2723).withOpacity(0.3),
+                      ),
+                    ],
+                  ),
+                ),
+                // Map style drop-down.
+                Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    border: Border.all(color: const Color(0xFF3E2723), width: 2),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 80),
+                    child: DropdownButton<String>(
+                      isDense: true,
+                      value: _selectedMapStyleName,
+                      icon: const Icon(Icons.keyboard_arrow_down, color: Color(0xFF3E2723)),
+                      dropdownColor: Colors.white,
+                      style: const TextStyle(color: Color(0xFF3E2723), fontWeight: FontWeight.bold),
+                      underline: const SizedBox(),
+                      onChanged: (newValue) {
+                        setState(() {
+                          _selectedMapStyleName = newValue!;
+                        });
+                      },
+                      items: _mapStyles.keys.map((styleName) {
+                        return DropdownMenuItem<String>(
+                          value: styleName,
+                          child: Text(styleName),
+                        );
+                      }).toList(),
+                    ),
+                  ),
                 ),
               ],
-            ),
-          ),
-          // Map style drop-down with white background, very dark brown border and green text.
-          Container(
-            margin: const EdgeInsets.symmetric(horizontal: 8),
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              border: Border.all(color: const Color(0xFF3E2723), width: 2),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 80),
-              child: DropdownButton<String>(
-                isDense: true,
-                value: _selectedMapStyleName,
-                icon: const Icon(Icons.keyboard_arrow_down,
-                    color: const Color(0xFF3E2723)),
-                dropdownColor: Colors.white,
-                style: const TextStyle(
-                    color: Color(0xFF3E2723), fontWeight: FontWeight.bold),
-                underline: const SizedBox(),
-                onChanged: (newValue) {
-                  setState(() {
-                    _selectedMapStyleName = newValue!;
-                  });
-                },
-                items: _mapStyles.keys.map((styleName) {
-                  return DropdownMenuItem<String>(
-                    value: styleName,
-                    child: Text(styleName),
-                  );
-                }).toList(),
-              ),
-            ),
-          ),
-
-          Container(
-            margin: const EdgeInsets.only(right: 16.0),
-            decoration: const BoxDecoration(
-              shape: BoxShape.circle,
-              color: Colors.white,
-            ),
-            child: IconButton(
-              icon: const Icon(Icons.settings, color: Colors.blue),
-              onPressed: () => _goToConfigPage(context),
             ),
           ),
         ],
       ),
+      // Main layout: Grid with two rows and three equally wide panels.
       body: Column(
         children: [
-          // Top control bar: search TAZ, view sync, open in Google Maps, radius control.
-          Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: Row(
-              children: [
-                // Old TAZ ID text field.
-                SizedBox(
-                  width: 120,
-                  child: TextField(
-                    controller: _searchController,
-                    decoration: const InputDecoration(
-                      labelText: "Old TAZ ID",
-                      filled: true,
-                      fillColor: Colors.white,
-                      border: OutlineInputBorder(),
+          // Top control bar wrapped in a horizontal scroll view to prevent overflow errors.
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minWidth: MediaQuery.of(context).size.width),
+              child: Padding(
+                padding: const EdgeInsets.all(8.0),
+                child: Row(
+                  children: [
+                    // Old TAZ ID text field.
+                    SizedBox(
+                      width: 120,
+                      child: TextField(
+                        controller: _searchController,
+                        decoration: const InputDecoration(
+                          labelText: "Old TAZ ID",
+                          filled: true,
+                          fillColor: Colors.white,
+                          border: OutlineInputBorder(),
+                        ),
+                        onSubmitted: (_) => _runSearch(),
+                      ),
                     ),
-                    onSubmitted: (_) => _runSearch(),
-                  ),
+                    const SizedBox(width: 8),
+                    // Search TAZ button.
+                    ElevatedButton(
+                      onPressed: _runSearch,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blue[900],
+                        foregroundColor: Colors.white,
+                      ),
+                      child: const Text("Search TAZ"),
+                    ),
+                    const SizedBox(width: 8),
+                    // Vertical divider.
+                    Container(
+                      height: 40,
+                      width: 1,
+                      color: Colors.grey,
+                    ),
+                    const SizedBox(width: 8),
+                    // View Sync toggle button.
+                    ElevatedButton(
+                      onPressed: () {
+                        setState(() {
+                          _isSyncEnabled = !_isSyncEnabled;
+                          if (!_isSyncEnabled) {
+                            // If turning sync OFF, clear the synced position.
+                            _syncedCameraPosition = null;
+                          }
+                        });
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _isSyncEnabled
+                            ? const Color(0xFF8B0000)
+                            : const Color(0xFF006400),
+                      ),
+                      child: Text(
+                        _isSyncEnabled ? "View Sync ON" : "View Sync OFF",
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    // Open in Google Maps button.
+                    ElevatedButton(
+                      onPressed: _openInGoogleMaps,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.deepOrange,
+                        foregroundColor: Colors.white,
+                      ),
+                      child: const Text("Open in Google Maps"),
+                    ),
+                    const SizedBox(width: 8),
+                    // Vertical divider.
+                    Container(
+                      height: 40,
+                      width: 1,
+                      color: Colors.grey,
+                    ),
+                    const SizedBox(width: 12),
+                    // Radius slider & text input.
+                    _buildRadiusControl(),
+                  ],
                 ),
-                const SizedBox(width: 8),
-                // Search TAZ button.
-                ElevatedButton(
-                  onPressed: _runSearch,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blue[900],
-                    foregroundColor: Colors.white,
-                  ),
-                  child: const Text("Search TAZ"),
-                ),
-                const SizedBox(width: 8),
-                // Vertical divider.
-                Container(
-                  height: 40,
-                  width: 1,
-                  color: Colors.grey,
-                ),
-                const SizedBox(width: 8),
-                // View Sync toggle button.
-                ElevatedButton(
-                  onPressed: () {
-                    setState(() {
-                      _isSyncEnabled = !_isSyncEnabled;
-                      if (!_isSyncEnabled) {
-                        // If turning sync OFF, clear the synced position.
-                        _syncedCameraPosition = null;
-                      }
-                    });
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: _isSyncEnabled
-                        ? const Color(0xFF8B0000)
-                        : const Color(0xFF006400),
-                  ),
-                  child: Text(
-                    _isSyncEnabled ? "View Sync ON" : "View Sync OFF",
-                    style: const TextStyle(color: Colors.white),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                // Open in Google Maps button.
-                ElevatedButton(
-                  onPressed: _openInGoogleMaps,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.deepOrange,
-                    foregroundColor: Colors.white,
-                  ),
-                  child: const Text("Open in Google Maps"),
-                ),
-                const SizedBox(width: 8),
-                // Additional vertical divider.
-                Container(
-                  height: 40,
-                  width: 1,
-                  color: Colors.grey,
-                ),
-                const SizedBox(width: 12),
-                // Radius slider & text input.
-                _buildRadiusControl(),
-              ],
+              ),
             ),
           ),
-          // Main content: left side maps & right side tables.
+          // Grid: Two rows of three panels each.
           Expanded(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
+            child: Column(
               children: [
-                // Left side: 4 maps in a 2x2 grid.
                 Expanded(
-                  flex: 2,
-                  child: Column(
+                  child: Row(
                     children: [
-                      // Top row: Old TAZ (left), New TAZ (right).
-                      Expanded(
-                        child: Row(
-                          children: [
-                            // Old TAZ map.
-                            Expanded(
-                              child: Container(
-                                margin: const EdgeInsets.all(4),
-                                decoration: BoxDecoration(
-                                  border:
-                                      Border.all(color: Colors.grey.shade400),
-                                ),
-                                child: MapView(
-                                  key: ValueKey(
-                                      "old_${_selectedTazId ?? 'none'}_${_radius.round()}"),
-                                  title: "Old TAZ (Blue target, Blue others)",
-                                  mode: MapViewMode.oldTaz,
-                                  drawShapes: _hasSearched,
-                                  selectedTazId: _selectedTazId,
-                                  radius: _radius,
-                                  cachedOldTaz: _cachedOldTaz,
-                                  // Pass cached blocks and index so _loadBlocksFill works here.
-                                  cachedBlocks: _cachedBlocks,
-                                  blocksIndex: _blocksIndex,
-                                  // Pass the new property for id labels toggle.
-                                  showIdLabels: _showIdLabels,
-                                  onTazSelected: (int tappedId) {
-                                    setState(() {
-                                      _selectedTazId = tappedId;
-                                      _searchController.text =
-                                          tappedId.toString();
-                                      _searchLabel =
-                                          "Currently Searching TAZ: $tappedId";
-                                    });
-                                  },
-                                  mapStyle: _mapStyles[_selectedMapStyleName],
-                                  // Camera sync
-                                  syncedCameraPosition: _isSyncEnabled
-                                      ? _syncedCameraPosition
-                                      : null,
-                                  onCameraIdleSync: _isSyncEnabled
-                                      ? (CameraPosition pos) {
-                                          setState(() {
-                                            _syncedCameraPosition = pos;
-                                          });
-                                        }
-                                      : null,
-                                ),
-                              ),
-                            ),
-                            const VerticalDivider(width: 1, color: Colors.grey),
-                            // New TAZ map.
-                            Expanded(
-                              child: Container(
-                                margin: const EdgeInsets.all(4),
-                                decoration: BoxDecoration(
-                                  border:
-                                      Border.all(color: Colors.grey.shade400),
-                                ),
-                                child: MapView(
-                                  key: ValueKey(
-                                      "new_${_selectedTazId ?? 'none'}_${_radius.round()}"),
-                                  title: "New TAZ (Red Outline)",
-                                  mode: MapViewMode.newTaz,
-                                  drawShapes: _hasSearched,
-                                  selectedTazId: _selectedTazId,
-                                  radius: _radius,
-                                  cachedOldTaz: _cachedOldTaz,
-                                  cachedNewTaz: _cachedNewTaz,
-                                  // Also pass cached blocks and index.
-                                  cachedBlocks: _cachedBlocks,
-                                  blocksIndex: _blocksIndex,
-                                  selectedIds: _selectedNewTazIds,
-                                  // Pass the new property for id labels toggle.
-                                  showIdLabels: _showIdLabels,
-                                  onTazSelected: (int tappedId) {
-                                    _toggleNewTazRow(tappedId);
-                                  },
-                                  mapStyle: _mapStyles[_selectedMapStyleName],
-                                  // Camera sync
-                                  syncedCameraPosition: _isSyncEnabled
-                                      ? _syncedCameraPosition
-                                      : null,
-                                  onCameraIdleSync: _isSyncEnabled
-                                      ? (CameraPosition pos) {
-                                          setState(() {
-                                            _syncedCameraPosition = pos;
-                                          });
-                                        }
-                                      : null,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const Divider(height: 1, color: Colors.grey),
-                      // Bottom row: Combined (left), Blocks (right).
-                      Expanded(
-                        child: Row(
-                          children: [
-                            // Combined map.
-                            Expanded(
-                              child: Container(
-                                margin: const EdgeInsets.all(4),
-                                decoration: BoxDecoration(
-                                  border:
-                                      Border.all(color: Colors.grey.shade400),
-                                ),
-                                child: MapView(
-                                  key: ValueKey(
-                                      "combined_${_selectedTazId ?? 'none'}_${_radius.round()}"),
-                                  title: "Combined View",
-                                  mode: MapViewMode.combined,
-                                  drawShapes: _hasSearched,
-                                  selectedTazId: _selectedTazId,
-                                  radius: _radius,
-                                  cachedOldTaz: _cachedOldTaz,
-                                  cachedNewTaz: _cachedNewTaz,
-                                  cachedBlocks: _cachedBlocks,
-                                  blocksIndex: _blocksIndex,
-                                  mapStyle: _mapStyles[_selectedMapStyleName],
-                                  // Camera sync
-                                  syncedCameraPosition: _isSyncEnabled
-                                      ? _syncedCameraPosition
-                                      : null,
-                                  onCameraIdleSync: _isSyncEnabled
-                                      ? (CameraPosition pos) {
-                                          setState(() {
-                                            _syncedCameraPosition = pos;
-                                          });
-                                        }
-                                      : null,
-                                ),
-                              ),
-                            ),
-                            const VerticalDivider(width: 1, color: Colors.grey),
-                            // Blocks map.
-                            Expanded(
-                              child: Container(
-                                margin: const EdgeInsets.all(4),
-                                decoration: BoxDecoration(
-                                  border:
-                                      Border.all(color: Colors.grey.shade400),
-                                ),
-                                child: MapView(
-                                  key: ValueKey(
-                                      "blocks_${_selectedTazId ?? 'none'}_${_radius.round()}"),
-                                  title: "Blocks",
-                                  mode: MapViewMode.blocks,
-                                  drawShapes: _hasSearched,
-                                  selectedTazId: _selectedTazId,
-                                  radius: _radius,
-                                  cachedOldTaz: _cachedOldTaz,
-                                  cachedNewTaz: _cachedNewTaz,
-                                  cachedBlocks: _cachedBlocks,
-                                  blocksIndex: _blocksIndex,
-                                  selectedIds: _selectedBlockIds,
-                                  onTazSelected: (int tappedId) {
-                                    _toggleBlockRow(tappedId);
-                                  },
-                                  mapStyle: _mapStyles[_selectedMapStyleName],
-                                  // Camera sync
-                                  syncedCameraPosition: _isSyncEnabled
-                                      ? _syncedCameraPosition
-                                      : null,
-                                  onCameraIdleSync: _isSyncEnabled
-                                      ? (CameraPosition pos) {
-                                          setState(() {
-                                            _syncedCameraPosition = pos;
-                                          });
-                                        }
-                                      : null,
-                                  showIdLabels: _showIdLabels,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                // Right side: data tables for selected new TAZ and blocks.
-                Container(
-                  width: 400,
-                  padding: const EdgeInsets.all(8.0),
-                  color: Colors.white,
-                  child: Column(
-                    children: [
-                      // New TAZ Table Header Row with Clear button
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          const Text(
-                            "New TAZ Table",
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          TextButton(
-                            onPressed: _clearNewTazTable,
-                            child: const Text(
-                              "Clear",
-                              style: TextStyle(
-                                  color: Color.fromARGB(255, 255, 0, 0)),
-                            ),
-                          ),
-                        ],
-                      ),
+                      // Panel 1: Old TAZ Map.
                       Expanded(
                         child: Container(
+                          margin: const EdgeInsets.all(4),
+                          decoration: BoxDecoration(
+                            border: Border.all(color: Colors.grey.shade400),
+                          ),
+                          child: MapView(
+                            key: ValueKey("old_${_selectedTazId ?? 'none'}_${_radius.round()}_${_selectedMapStyleName}"),
+                            title: "Old TAZ",
+                            mode: MapViewMode.oldTaz,
+                            drawShapes: _hasSearched,
+                            selectedTazId: _selectedTazId,
+                            radius: _radius,
+                            cachedOldTaz: _cachedOldTaz,
+                            cachedBlocks: _cachedBlocks,
+                            blocksIndex: _blocksIndex,
+                            showIdLabels: _showIdLabels,
+                            // Automatic search on tap is disabled.
+                            onTazSelected: (int tappedId) {
+                              debugPrint("Old TAZ tapped: $tappedId (automatic search disabled)");
+                            },
+                            mapStyle: _mapStyles[_selectedMapStyleName],
+                            syncedCameraPosition: _isSyncEnabled ? _syncedCameraPosition : null,
+                            onCameraIdleSync: _isSyncEnabled
+                                ? (CameraPosition pos) {
+                                    setState(() {
+                                      _syncedCameraPosition = pos;
+                                    });
+                                  }
+                                : null,
+                          ),
+                        ),
+                      ),
+                      // Panel 2: New TAZ Map.
+                      Expanded(
+                        child: Container(
+                          margin: const EdgeInsets.all(4),
+                          decoration: BoxDecoration(
+                            border: Border.all(color: Colors.grey.shade400),
+                          ),
+                          child: MapView(
+                            key: ValueKey("new_${_selectedTazId ?? 'none'}_${_radius.round()}_${_selectedMapStyleName}"),
+                            title: "New TAZ",
+                            mode: MapViewMode.newTaz,
+                            drawShapes: _hasSearched,
+                            selectedTazId: _selectedTazId,
+                            radius: _radius,
+                            cachedOldTaz: _cachedOldTaz,
+                            cachedNewTaz: _cachedNewTaz,
+                            cachedBlocks: _cachedBlocks,
+                            blocksIndex: _blocksIndex,
+                            selectedIds: _selectedNewTazIds,
+                            showIdLabels: _showIdLabels,
+                            onTazSelected: (int tappedId) {
+                              _toggleNewTazRow(tappedId);
+                            },
+                            mapStyle: _mapStyles[_selectedMapStyleName],
+                            syncedCameraPosition: _isSyncEnabled ? _syncedCameraPosition : null,
+                            onCameraIdleSync: _isSyncEnabled
+                                ? (CameraPosition pos) {
+                                    setState(() {
+                                      _syncedCameraPosition = pos;
+                                    });
+                                  }
+                                : null,
+                          ),
+                        ),
+                      ),
+                      // Panel 3: New TAZ Table.
+                      Expanded(
+                        child: Container(
+                          margin: const EdgeInsets.all(4),
                           decoration: BoxDecoration(
                             border: Border.all(color: Colors.blueAccent),
                             borderRadius: BorderRadius.circular(4),
                           ),
-                          child: SingleChildScrollView(
-                            scrollDirection: Axis.vertical,
-                            child: SingleChildScrollView(
-                              scrollDirection: Axis.horizontal,
-                              child: DataTable(
-                                headingRowColor:
-                                    MaterialStateProperty.all(Colors.blue[50]),
-                                columns: const [
-                                  DataColumn(label: Text("ID")),
-                                  DataColumn(label: Text("HH19")),
-                                  DataColumn(label: Text("PERSNS19")),
-                                  DataColumn(label: Text("WORKRS19")),
-                                  DataColumn(label: Text("EMP19")),
-                                  DataColumn(label: Text("HH49")),
-                                  DataColumn(label: Text("PERSNS49")),
-                                  DataColumn(label: Text("WORKRS49")),
-                                  DataColumn(label: Text("EMP49")),
+                          child: Column(
+                            children: [
+                              // Table header with clear button.
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  const Text(
+                                    "New TAZ Table",
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  TextButton(
+                                    onPressed: _clearNewTazTable,
+                                    child: const Text(
+                                      "Clear",
+                                      style: TextStyle(color: Color.fromARGB(255, 255, 0, 0)),
+                                    ),
+                                  ),
                                 ],
-                                rows: () {
-                                  List<DataRow> rows = [];
-                                  if (_newTazTableData.isNotEmpty) {
-                                    rows.addAll(_newTazTableData.map((row) {
-                                      return DataRow(cells: [
-                                        DataCell(Text("${row['id']}")),
-                                        DataCell(Text("${row['hh19']}")),
-                                        DataCell(Text("${row['persns19']}")),
-                                        DataCell(Text("${row['workrs19']}")),
-                                        DataCell(Text("${row['emp19']}")),
-                                        DataCell(Text("${row['hh49']}")),
-                                        DataCell(Text("${row['persns49']}")),
-                                        DataCell(Text("${row['workrs49']}")),
-                                        DataCell(Text("${row['emp49']}")),
-                                      ]);
-                                    }).toList());
-                                  } else {
-                                    rows.add(const DataRow(cells: [
-                                      DataCell(Text("No data")),
-                                      DataCell(Text("")),
-                                      DataCell(Text("")),
-                                      DataCell(Text("")),
-                                      DataCell(Text("")),
-                                      DataCell(Text("")),
-                                      DataCell(Text("")),
-                                      DataCell(Text("")),
-                                      DataCell(Text("")),
-                                    ]));
-                                  }
-                                  // Compute sums for each column.
-                                  num sumHH19 = _newTazTableData.fold(
-                                      0,
-                                      (prev, row) =>
-                                          prev + (row['hh19'] as num));
-                                  num sumPERSNS19 = _newTazTableData.fold(
-                                      0,
-                                      (prev, row) =>
-                                          prev + (row['persns19'] as num));
-                                  num sumWORKRS19 = _newTazTableData.fold(
-                                      0,
-                                      (prev, row) =>
-                                          prev + (row['workrs19'] as num));
-                                  num sumEMP19 = _newTazTableData.fold(
-                                      0,
-                                      (prev, row) =>
-                                          prev + (row['emp19'] as num));
-                                  num sumHH49 = _newTazTableData.fold(
-                                      0,
-                                      (prev, row) =>
-                                          prev + (row['hh49'] as num));
-                                  num sumPERSNS49 = _newTazTableData.fold(
-                                      0,
-                                      (prev, row) =>
-                                          prev + (row['persns49'] as num));
-                                  num sumWORKRS49 = _newTazTableData.fold(
-                                      0,
-                                      (prev, row) =>
-                                          prev + (row['workrs49'] as num));
-                                  num sumEMP49 = _newTazTableData.fold(
-                                      0,
-                                      (prev, row) =>
-                                          prev + (row['emp49'] as num));
-
-                                  // Add a total row.
-                                  rows.add(DataRow(
-                                    color: MaterialStateProperty.all(
-                                        Colors.grey[300]),
-                                    cells: [
-                                      const DataCell(Text(
-                                        "Total",
-                                        style: TextStyle(
-                                            fontWeight: FontWeight.bold),
-                                      )),
-                                      DataCell(Text(
-                                        "$sumHH19",
-                                        style: const TextStyle(
-                                            fontWeight: FontWeight.bold),
-                                      )),
-                                      DataCell(Text(
-                                        "$sumPERSNS19",
-                                        style: const TextStyle(
-                                            fontWeight: FontWeight.bold),
-                                      )),
-                                      DataCell(Text(
-                                        "$sumWORKRS19",
-                                        style: const TextStyle(
-                                            fontWeight: FontWeight.bold),
-                                      )),
-                                      DataCell(Text(
-                                        "$sumEMP19",
-                                        style: const TextStyle(
-                                            fontWeight: FontWeight.bold),
-                                      )),
-                                      DataCell(Text(
-                                        "$sumHH49",
-                                        style: const TextStyle(
-                                            fontWeight: FontWeight.bold),
-                                      )),
-                                      DataCell(Text(
-                                        "$sumPERSNS49",
-                                        style: const TextStyle(
-                                            fontWeight: FontWeight.bold),
-                                      )),
-                                      DataCell(Text(
-                                        "$sumWORKRS49",
-                                        style: const TextStyle(
-                                            fontWeight: FontWeight.bold),
-                                      )),
-                                      DataCell(Text(
-                                        "$sumEMP49",
-                                        style: const TextStyle(
-                                            fontWeight: FontWeight.bold),
-                                      )),
-                                    ],
-                                  ));
-                                  return rows;
-                                }(),
                               ),
-                            ),
+                              Expanded(
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    border: Border.all(color: Colors.blueAccent),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: SingleChildScrollView(
+                                    scrollDirection: Axis.vertical,
+                                    child: Scrollbar(
+                                      controller: _newTableHorizontalScrollController,
+                                      thumbVisibility: true,
+                                      interactive: true,
+                                      child: SingleChildScrollView(
+                                        scrollDirection: Axis.horizontal,
+                                        controller: _newTableHorizontalScrollController,
+                                        child: DataTable(
+                                          headingRowColor: MaterialStateProperty.all(Colors.blue[50]),
+                                          columns: const [
+                                            DataColumn(label: Text("ID")),
+                                            DataColumn(label: Text("HH19")),
+                                            DataColumn(label: Text("HH49")),
+                                            DataColumn(label: Text("EMP19")),
+                                            DataColumn(label: Text("EMP49")),
+                                            DataColumn(label: Text("PERSNS19")),
+                                            DataColumn(label: Text("PERSNS49")),
+                                            DataColumn(label: Text("WORKRS19")),
+                                            DataColumn(label: Text("WORKRS49")),
+                                          ],
+                                          rows: () {
+                                            List<DataRow> rows = [];
+                                            if (_newTazTableData.isNotEmpty) {
+                                              rows.addAll(_newTazTableData.map((row) {
+                                                return DataRow(cells: [
+                                                  buildDataCell(row['id']),
+                                                  buildDataCell(row['hh19']),
+                                                  buildDataCell(row['hh49']),
+                                                  buildDataCell(row['emp19']),
+                                                  buildDataCell(row['emp49']),
+                                                  buildDataCell(row['persns19']),
+                                                  buildDataCell(row['persns49']),
+                                                  buildDataCell(row['workrs19']),
+                                                  buildDataCell(row['workrs49']),
+                                                ]);
+                                              }).toList());
+                                            } else {
+                                              rows.add(const DataRow(cells: [
+                                                DataCell(Text("No data")),
+                                                DataCell(Text("")),
+                                                DataCell(Text("")),
+                                                DataCell(Text("")),
+                                                DataCell(Text("")),
+                                                DataCell(Text("")),
+                                                DataCell(Text("")),
+                                                DataCell(Text("")),
+                                                DataCell(Text("")),
+                                              ]));
+                                            }
+                                            // Compute column totals.
+                                            num sumHH19 = _newTazTableData.fold(0, (prev, row) => prev + (row['hh19'] as num));
+                                            num sumPERSNS19 = _newTazTableData.fold(0, (prev, row) => prev + (row['persns19'] as num));
+                                            num sumWORKRS19 = _newTazTableData.fold(0, (prev, row) => prev + (row['workrs19'] as num));
+                                            num sumEMP19 = _newTazTableData.fold(0, (prev, row) => prev + (row['emp19'] as num));
+                                            num sumHH49 = _newTazTableData.fold(0, (prev, row) => prev + (row['hh49'] as num));
+                                            num sumPERSNS49 = _newTazTableData.fold(0, (prev, row) => prev + (row['persns49'] as num));
+                                            num sumWORKRS49 = _newTazTableData.fold(0, (prev, row) => prev + (row['workrs49'] as num));
+                                            num sumEMP49 = _newTazTableData.fold(0, (prev, row) => prev + (row['emp49'] as num));
+
+                                            rows.add(DataRow(
+                                              color: MaterialStateProperty.all(Colors.grey[300]),
+                                              cells: [
+                                                const DataCell(Text("Total", style: TextStyle(fontWeight: FontWeight.bold))),
+                                                buildDataCell(sumHH19),
+                                                buildDataCell(sumHH49),
+                                                buildDataCell(sumEMP19),
+                                                buildDataCell(sumEMP49),
+                                                buildDataCell(sumPERSNS19),
+                                                buildDataCell(sumPERSNS49),
+                                                buildDataCell(sumWORKRS19),
+                                                buildDataCell(sumWORKRS49),
+                                              ],
+                                            ));
+                                            return rows;
+                                          }(),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ),
-                      const SizedBox(height: 16),
-                      // Blocks Table Header Row with Clear button
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          const Text(
-                            "Blocks Table",
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          TextButton(
-                            onPressed: _clearBlocksTable,
-                            child: const Text(
-                              "Clear",
-                              style: TextStyle(
-                                  color: Color.fromARGB(255, 255, 0, 0)),
-                            ),
-                          ),
-                        ],
-                      ),
+                    ],
+                  ),
+                ),
+                // Second row of panels.
+                Expanded(
+                  child: Row(
+                    children: [
+                      // Panel 4: Combined Map.
                       Expanded(
                         child: Container(
+                          margin: const EdgeInsets.all(4),
+                          decoration: BoxDecoration(
+                            border: Border.all(color: Colors.grey.shade400),
+                          ),
+                          child: MapView(
+                            key: ValueKey("combined_${_selectedTazId ?? 'none'}_${_radius.round()}_${_selectedMapStyleName}"),
+                            title: "Combined View",
+                            mode: MapViewMode.combined,
+                            drawShapes: _hasSearched,
+                            selectedTazId: _selectedTazId,
+                            radius: _radius,
+                            cachedOldTaz: _cachedOldTaz,
+                            cachedNewTaz: _cachedNewTaz,
+                            cachedBlocks: _cachedBlocks,
+                            blocksIndex: _blocksIndex,
+                            mapStyle: _mapStyles[_selectedMapStyleName],
+                            syncedCameraPosition: _isSyncEnabled ? _syncedCameraPosition : null,
+                            onCameraIdleSync: _isSyncEnabled
+                                ? (CameraPosition pos) {
+                                    setState(() {
+                                      _syncedCameraPosition = pos;
+                                    });
+                                  }
+                                : null,
+                          ),
+                        ),
+                      ),
+                      // Panel 5: Blocks Map.
+                      Expanded(
+                        child: Container(
+                          margin: const EdgeInsets.all(4),
+                          decoration: BoxDecoration(
+                            border: Border.all(color: Colors.grey.shade400),
+                          ),
+                          child: MapView(
+                            key: ValueKey("blocks_${_selectedTazId ?? 'none'}_${_radius.round()}_${_selectedMapStyleName}"),
+                            title: "Blocks",
+                            mode: MapViewMode.blocks,
+                            drawShapes: _hasSearched,
+                            selectedTazId: _selectedTazId,
+                            radius: _radius,
+                            cachedOldTaz: _cachedOldTaz,
+                            cachedNewTaz: _cachedNewTaz,
+                            cachedBlocks: _cachedBlocks,
+                            blocksIndex: _blocksIndex,
+                            selectedIds: _selectedBlockIds,
+                            onTazSelected: (int tappedId) {
+                              _toggleBlockRow(tappedId);
+                            },
+                            mapStyle: _mapStyles[_selectedMapStyleName],
+                            syncedCameraPosition: _isSyncEnabled ? _syncedCameraPosition : null,
+                            onCameraIdleSync: _isSyncEnabled
+                                ? (CameraPosition pos) {
+                                    setState(() {
+                                      _syncedCameraPosition = pos;
+                                    });
+                                  }
+                                : null,
+                            showIdLabels: _showIdLabels,
+                          ),
+                        ),
+                      ),
+                      // Panel 6: Blocks Table.
+                      Expanded(
+                        child: Container(
+                          margin: const EdgeInsets.all(4),
                           decoration: BoxDecoration(
                             border: Border.all(color: Colors.orangeAccent),
                             borderRadius: BorderRadius.circular(4),
                           ),
-                          child: SingleChildScrollView(
-                            scrollDirection: Axis.vertical,
-                            child: SingleChildScrollView(
-                              scrollDirection: Axis.horizontal,
-                              child: DataTable(
-                                headingRowColor: MaterialStateProperty.all(
-                                    Colors.orange[50]),
-                                columns: const [
-                                  DataColumn(label: Text("ID")),
-                                  DataColumn(label: Text("HH19")),
-                                  DataColumn(label: Text("PERSNS19")),
-                                  DataColumn(label: Text("WORKRS19")),
-                                  DataColumn(label: Text("EMP19")),
-                                  DataColumn(label: Text("HH49")),
-                                  DataColumn(label: Text("PERSNS49")),
-                                  DataColumn(label: Text("WORKRS49")),
-                                  DataColumn(label: Text("EMP49")),
+                          child: Column(
+                            children: [
+                              // Table header with clear button.
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  const Text(
+                                    "Blocks Table",
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  TextButton(
+                                    onPressed: _clearBlocksTable,
+                                    child: const Text(
+                                      "Clear",
+                                      style: TextStyle(color: Color.fromARGB(255, 255, 0, 0)),
+                                    ),
+                                  ),
                                 ],
-                                rows: () {
-                                  List<DataRow> rows = [];
-                                  if (_blocksTableData.isNotEmpty) {
-                                    rows.addAll(_blocksTableData.map((row) {
-                                      return DataRow(cells: [
-                                        DataCell(Text("${row['id']}")),
-                                        DataCell(Text("${row['hh19']}")),
-                                        DataCell(Text("${row['persns19']}")),
-                                        DataCell(Text("${row['workrs19']}")),
-                                        DataCell(Text("${row['emp19']}")),
-                                        DataCell(Text("${row['hh49']}")),
-                                        DataCell(Text("${row['persns49']}")),
-                                        DataCell(Text("${row['workrs49']}")),
-                                        DataCell(Text("${row['emp49']}")),
-                                      ]);
-                                    }).toList());
-                                  } else {
-                                    rows.add(const DataRow(cells: [
-                                      DataCell(Text("No data")),
-                                      DataCell(Text("")),
-                                      DataCell(Text("")),
-                                      DataCell(Text("")),
-                                      DataCell(Text("")),
-                                      DataCell(Text("")),
-                                      DataCell(Text("")),
-                                      DataCell(Text("")),
-                                      DataCell(Text("")),
-                                    ]));
-                                  }
-                                  double sumHH19 = _blocksTableData.fold(
-                                      0.0,
-                                      (prev, row) =>
-                                          prev +
-                                          (row['hh19'] as num).toDouble());
-                                  double sumPERSNS19 = _blocksTableData.fold(
-                                      0.0,
-                                      (prev, row) =>
-                                          prev +
-                                          (row['persns19'] as num).toDouble());
-                                  double sumWORKRS19 = _blocksTableData.fold(
-                                      0.0,
-                                      (prev, row) =>
-                                          prev +
-                                          (row['workrs19'] as num).toDouble());
-                                  double sumEMP19 = _blocksTableData.fold(
-                                      0.0,
-                                      (prev, row) =>
-                                          prev +
-                                          (row['emp19'] as num).toDouble());
-                                  double sumHH49 = _blocksTableData.fold(
-                                      0.0,
-                                      (prev, row) =>
-                                          prev +
-                                          (row['hh49'] as num).toDouble());
-                                  double sumPERSNS49 = _blocksTableData.fold(
-                                      0.0,
-                                      (prev, row) =>
-                                          prev +
-                                          (row['persns49'] as num).toDouble());
-                                  double sumWORKRS49 = _blocksTableData.fold(
-                                      0.0,
-                                      (prev, row) =>
-                                          prev +
-                                          (row['workrs49'] as num).toDouble());
-                                  double sumEMP49 = _blocksTableData.fold(
-                                      0.0,
-                                      (prev, row) =>
-                                          prev +
-                                          (row['emp49'] as num).toDouble());
-
-                                  rows.add(DataRow(
-                                    color: MaterialStateProperty.all(
-                                        Colors.grey[300]),
-                                    cells: [
-                                      const DataCell(Text(
-                                        "Total",
-                                        style: TextStyle(
-                                            fontWeight: FontWeight.bold),
-                                      )),
-                                      DataCell(Text(
-                                        sumHH19.toString(),
-                                        style: const TextStyle(
-                                            fontWeight: FontWeight.bold),
-                                      )),
-                                      DataCell(Text(
-                                        sumPERSNS19.toString(),
-                                        style: const TextStyle(
-                                            fontWeight: FontWeight.bold),
-                                      )),
-                                      DataCell(Text(
-                                        sumWORKRS19.toString(),
-                                        style: const TextStyle(
-                                            fontWeight: FontWeight.bold),
-                                      )),
-                                      DataCell(Text(
-                                        sumEMP19.toString(),
-                                        style: const TextStyle(
-                                            fontWeight: FontWeight.bold),
-                                      )),
-                                      DataCell(Text(
-                                        sumHH49.toString(),
-                                        style: const TextStyle(
-                                            fontWeight: FontWeight.bold),
-                                      )),
-                                      DataCell(Text(
-                                        sumPERSNS49.toString(),
-                                        style: const TextStyle(
-                                            fontWeight: FontWeight.bold),
-                                      )),
-                                      DataCell(Text(
-                                        sumWORKRS49.toString(),
-                                        style: const TextStyle(
-                                            fontWeight: FontWeight.bold),
-                                      )),
-                                      DataCell(Text(
-                                        sumEMP49.toString(),
-                                        style: const TextStyle(
-                                            fontWeight: FontWeight.bold),
-                                      )),
-                                    ],
-                                  ));
-                                  return rows;
-                                }(),
                               ),
-                            ),
+                              Expanded(
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    border: Border.all(color: Colors.orangeAccent),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: SingleChildScrollView(
+                                    scrollDirection: Axis.vertical,
+                                    child: Scrollbar(
+                                      controller: _blocksTableHorizontalScrollController,
+                                      thumbVisibility: true,
+                                      interactive: true,
+                                      child: SingleChildScrollView(
+                                        scrollDirection: Axis.horizontal,
+                                        controller: _blocksTableHorizontalScrollController,
+                                        child: DataTable(
+                                          headingRowColor: MaterialStateProperty.all(Colors.orange[50]),
+                                          columns: const [
+                                            DataColumn(label: Text("ID")),
+                                            DataColumn(label: Text("HH19")),
+                                            DataColumn(label: Text("HH49")),
+                                            DataColumn(label: Text("EMP19")),
+                                            DataColumn(label: Text("EMP49")),
+                                            DataColumn(label: Text("PERSNS19")),
+                                            DataColumn(label: Text("PERSNS49")),
+                                            DataColumn(label: Text("WORKRS19")),
+                                            DataColumn(label: Text("WORKRS49")),
+                                          ],
+                                          rows: () {
+                                            List<DataRow> rows = [];
+                                            if (_blocksTableData.isNotEmpty) {
+                                              rows.addAll(_blocksTableData.map((row) {
+                                                return DataRow(cells: [
+                                                  buildDataCell(row['id']),
+                                                  buildDataCell(row['hh19']),
+                                                  buildDataCell(row['hh49']),
+                                                  buildDataCell(row['emp19']),
+                                                  buildDataCell(row['emp49']),
+                                                  buildDataCell(row['persns19']),
+                                                  buildDataCell(row['persns49']),
+                                                  buildDataCell(row['workrs19']),
+                                                  buildDataCell(row['workrs49']),
+                                                ]);
+                                              }).toList());
+                                            } else {
+                                              rows.add(const DataRow(cells: [
+                                                DataCell(Text("No data")),
+                                                DataCell(Text("")),
+                                                DataCell(Text("")),
+                                                DataCell(Text("")),
+                                                DataCell(Text("")),
+                                                DataCell(Text("")),
+                                                DataCell(Text("")),
+                                                DataCell(Text("")),
+                                                DataCell(Text("")),
+                                              ]));
+                                            }
+                                            double sumHH19 = _blocksTableData.fold(0.0, (prev, row) => prev + (row['hh19'] as num).toDouble());
+                                            double sumPERSNS19 = _blocksTableData.fold(0.0, (prev, row) => prev + (row['persns19'] as num).toDouble());
+                                            double sumWORKRS19 = _blocksTableData.fold(0.0, (prev, row) => prev + (row['workrs19'] as num).toDouble());
+                                            double sumEMP19 = _blocksTableData.fold(0.0, (prev, row) => prev + (row['emp19'] as num).toDouble());
+                                            double sumHH49 = _blocksTableData.fold(0.0, (prev, row) => prev + (row['hh49'] as num).toDouble());
+                                            double sumPERSNS49 = _blocksTableData.fold(0.0, (prev, row) => prev + (row['persns49'] as num).toDouble());
+                                            double sumWORKRS49 = _blocksTableData.fold(0.0, (prev, row) => prev + (row['workrs49'] as num).toDouble());
+                                            double sumEMP49 = _blocksTableData.fold(0.0, (prev, row) => prev + (row['emp49'] as num).toDouble());
+
+                                            rows.add(DataRow(
+                                              color: MaterialStateProperty.all(Colors.grey[300]),
+                                              cells: [
+                                                const DataCell(Text("Total", style: TextStyle(fontWeight: FontWeight.bold))),
+                                                buildDataCell(sumHH19),
+                                                buildDataCell(sumHH49),
+                                                buildDataCell(sumEMP19),
+                                                buildDataCell(sumEMP49),
+                                                buildDataCell(sumPERSNS19),
+                                                buildDataCell(sumPERSNS49),
+                                                buildDataCell(sumWORKRS19),
+                                                buildDataCell(sumWORKRS49),
+                                              ],
+                                            ));
+                                            return rows;
+                                          }(),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ),
@@ -1316,6 +1367,51 @@ class _DashboardPageState extends State<DashboardPage> {
                   ),
                 ),
               ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  /// Builds the three upload buttons as a Row.
+  Widget _buildUploadButtons() {
+    return Container(
+      padding: const EdgeInsets.all(4),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Old TAZ upload button.
+          Tooltip(
+            message: "Upload Old TAZ GeoJSON file",
+            child: IconButton(
+              icon: Icon(
+                Icons.cloud_upload,
+                color: _uploadedOldTaz ? Colors.lightGreen : Colors.red,
+              ),
+              onPressed: () => _uploadGeoJson("old_taz"),
+            ),
+          ),
+          // New TAZ upload button.
+          Tooltip(
+            message: "Upload New TAZ GeoJSON file",
+            child: IconButton(
+              icon: Icon(
+                Icons.cloud_upload,
+                color: _uploadedNewTaz ? Colors.lightGreen : Colors.red,
+              ),
+              onPressed: () => _uploadGeoJson("new_taz"),
+            ),
+          ),
+          // Blocks upload button.
+          Tooltip(
+            message: "Upload Blocks GeoJSON file",
+            child: IconButton(
+              icon: Icon(
+                Icons.cloud_upload,
+                color: _uploadedBlocks ? Colors.lightGreen : Colors.red,
+              ),
+              onPressed: () => _uploadGeoJson("blocks"),
             ),
           ),
         ],
@@ -1340,13 +1436,10 @@ class MapView extends StatefulWidget {
   final ValueChanged<int>? onTazSelected;
   final Set<int>? selectedIds;
   final String? mapStyle;
-
   /// If provided, this map will sync its camera to [syncedCameraPosition].
   final CameraPosition? syncedCameraPosition;
-
   /// If set, whenever this map finishes moving, it calls [onCameraIdleSync] with its camera position.
   final ValueChanged<CameraPosition>? onCameraIdleSync;
-
   // New property to toggle TAZ id labels (and now block id labels as well)
   final bool showIdLabels;
 
@@ -1366,7 +1459,7 @@ class MapView extends StatefulWidget {
     this.mapStyle,
     this.syncedCameraPosition,
     this.onCameraIdleSync,
-    this.showIdLabels = false, // default value
+    this.showIdLabels = false, // default value if not provided.
   }) : super(key: key);
 
   @override
@@ -1382,24 +1475,22 @@ class MapViewState extends State<MapView> {
   void didUpdateWidget(covariant MapView oldWidget) {
     super.didUpdateWidget(oldWidget);
 
-    // If selection changes in new TAZ, update the filter.
+    // If selection changes in New TAZ, update the filter.
     if (widget.mode == MapViewMode.newTaz && controller != null) {
-      final newFilter =
-          (widget.selectedIds != null && widget.selectedIds!.isNotEmpty)
-              ? ["in", "taz_id", ...widget.selectedIds!.toList()]
-              : ["==", "taz_id", ""];
+      final newFilter = (widget.selectedIds != null && widget.selectedIds!.isNotEmpty)
+          ? ["in", "taz_id", ...widget.selectedIds!.toList()]
+          : ["==", "taz_id", ""];
       controller!.setFilter("selected_new_taz_fill", newFilter);
     }
-    // If selection changes in blocks, update the filter.
+    // If selection changes in Blocks, update the filter.
     if (widget.mode == MapViewMode.blocks && controller != null) {
-      final newFilter =
-          (widget.selectedIds != null && widget.selectedIds!.isNotEmpty)
-              ? ["in", "geoid20", ...widget.selectedIds!.toList()]
-              : ["==", "geoid20", ""];
+      final newFilter = (widget.selectedIds != null && widget.selectedIds!.isNotEmpty)
+          ? ["in", "geoid20", ...widget.selectedIds!.toList()]
+          : ["==", "geoid20", ""];
       controller!.setFilter("selected_blocks_fill", newFilter);
     }
 
-    // Reload layers if TAZ ID or radius changed.
+    // Reload layers if TAZ ID, drawing flag, or radius changed.
     if (oldWidget.selectedTazId != widget.selectedTazId ||
         oldWidget.drawShapes != widget.drawShapes ||
         oldWidget.radius != widget.radius) {
@@ -1407,7 +1498,7 @@ class MapViewState extends State<MapView> {
       _loadLayers();
     }
 
-    // If we're using sync, check if the map should move to the syncedCameraPosition.
+    // If camera sync is enabled, move this map to the synced camera position.
     if (widget.syncedCameraPosition != oldWidget.syncedCameraPosition) {
       _maybeMoveToSyncedPosition();
     }
@@ -1419,23 +1510,17 @@ class MapViewState extends State<MapView> {
           controller!.addSymbolLayer(
             "old_taz_target_source",
             "old_taz_target_labels",
-            SymbolLayerProperties(
+            createIdLabelProperties(
               textField: "{taz_id}",
-              textSize: 12,
-              textColor: "#0000FF",
-              textHaloColor: "#FFFFFF",
-              textHaloWidth: 1,
+              textColor: "#F85B00",
             ),
           );
           controller!.addSymbolLayer(
             "old_taz_others_source",
             "old_taz_others_labels",
-            SymbolLayerProperties(
+            createIdLabelProperties(
               textField: "{taz_id}",
-              textSize: 12,
-              textColor: "#4169E1",
-              textHaloColor: "#FFFFFF",
-              textHaloWidth: 1,
+              textColor: "#0000FF",
             ),
           );
         } else {
@@ -1447,12 +1532,9 @@ class MapViewState extends State<MapView> {
           controller!.addSymbolLayer(
             "new_taz_source",
             "new_taz_labels",
-            SymbolLayerProperties(
+            createIdLabelProperties(
               textField: "{taz_id}",
-              textSize: 12,
               textColor: "#FF0000",
-              textHaloColor: "#FFFFFF",
-              textHaloWidth: 1,
             ),
           );
         } else {
@@ -1463,12 +1545,9 @@ class MapViewState extends State<MapView> {
           controller!.addSymbolLayer(
             "blocks_fill_source",
             "blocks_labels",
-            SymbolLayerProperties(
+            createIdLabelProperties(
               textField: "{block_label}",
-              textSize: 12,
               textColor: "#000000",
-              textHaloColor: "#FFFFFF",
-              textHaloWidth: 1,
             ),
           );
         } else {
@@ -1487,10 +1566,11 @@ class MapViewState extends State<MapView> {
   Widget build(BuildContext context) {
     return Stack(
       children: [
+        // The MaplibreMap widget.
         GestureDetector(
           behavior: HitTestBehavior.translucent,
           onTapDown: (TapDownDetails details) async {
-            // Convert local tap coordinates to a map click.
+            // Convert the local tap position to a map coordinate and handle the click.
             final tapPoint = Point<double>(
                 details.localPosition.dx, details.localPosition.dy);
             _handleMapClick(tapPoint);
@@ -1500,13 +1580,13 @@ class MapViewState extends State<MapView> {
                 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json',
             onMapCreated: _onMapCreated,
             initialCameraPosition: const CameraPosition(
-              target: LatLng(42.3601, -71.0589), // Boston
+              target: LatLng(42.3601, -71.0589), // Default to Boston.
               zoom: 12,
             ),
             onStyleLoadedCallback: _onStyleLoaded,
             onCameraIdle: () async {
               if (controller != null) {
-                // We only trigger onCameraIdleSync if user moved the camera (not a forced sync).
+                // Only trigger onCameraIdleSync if the user moved the camera (and not via programmatic update).
                 if (!_isProgrammaticallyUpdating &&
                     widget.onCameraIdleSync != null) {
                   CameraPosition? pos = await controller?.cameraPosition;
@@ -1519,7 +1599,7 @@ class MapViewState extends State<MapView> {
             },
           ),
         ),
-        // Positioned label
+        // Positioned overlay label showing map title and description.
         Positioned(
           top: 8,
           left: 8,
@@ -1536,86 +1616,81 @@ class MapViewState extends State<MapView> {
     );
   }
 
-  /// Returns the text to show in the top-left label on the map.
   String _buildLabelText() {
-    if (widget.mode == MapViewMode.oldTaz ||
-        widget.mode == MapViewMode.newTaz) {
+    // if (widget.mode == MapViewMode.newTaz || widget.mode == MapViewMode.combined || widget.mode == MapViewMode.blocks) {
+    //   return widget.title;
+    // } else if (widget.mode == MapViewMode.newTaz) {
+    //   return "${widget.title}\nTAZ: ${widget.selectedTazId ?? 'None'}";
+    // } else if (widget.mode == MapViewMode.blocks) {
+    //   if (widget.selectedIds != null && widget.selectedIds!.isNotEmpty) {
+    //     return "${widget.title}\nSelected: ${widget.selectedIds!.join(', ')}";
+    //   } else {
+    //     return "${widget.title}\nSelected: None";
+    //   }
+    // } 
+    
+    if (widget.mode == MapViewMode.oldTaz) {
       return "${widget.title}\nTAZ: ${widget.selectedTazId ?? 'None'}";
-    } else if (widget.mode == MapViewMode.blocks) {
-      if (widget.selectedIds != null && widget.selectedIds!.isNotEmpty) {
-        return "${widget.title}\nSelected: ${widget.selectedIds!.join(', ')}";
-      } else {
-        return "${widget.title}\nSelected: None";
-      }
     } else {
       return widget.title;
     }
   }
 
-  /// Map creation callback.
+  /// Callback when the map is created.
   void _onMapCreated(MaplibreMapController ctrl) {
     controller = ctrl;
-    // If a synced camera position is supplied right away, move to it.
+    // After the first frame, check if we need to move the camera to a synced position.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _maybeMoveToSyncedPosition();
     });
   }
 
-  /// Called when the style is fully loaded (including sources).
+  /// Called when the map's style is fully loaded.
   Future<void> _onStyleLoaded() async {
     // Reset the flag so that custom layers are always reloaded.
     _hasLoadedLayers = false;
     await _loadLayers();
   }
 
-  /// Moves this map to the globally synced camera position (if any).
+  /// Moves the map to the globally synced camera position (if any).
   void _maybeMoveToSyncedPosition() async {
     if (controller == null || widget.syncedCameraPosition == null) return;
-
     _isProgrammaticallyUpdating = true;
     await controller!.moveCamera(
       CameraUpdate.newCameraPosition(widget.syncedCameraPosition!),
     );
   }
 
-  /// Loads the relevant layers depending on [widget.mode].
+  /// Loads the drawing layers based on the current MapView mode.
   Future<void> _loadLayers() async {
     if (controller == null) return;
     try {
       if (widget.mode == MapViewMode.oldTaz) {
         await _loadOldTazLayers();
         await _loadRadiusCircle();
-        // Replace drawing all blocks with a filtered set of blocks (without auto-zoom).
         await _loadBlocksFill();
-        // If the toggle is enabled, add id label layers:
+        // If ID labels toggle is enabled, add the corresponding symbol layers.
         if (widget.showIdLabels) {
           await controller!.addSymbolLayer(
             "old_taz_target_source",
             "old_taz_target_labels",
-            SymbolLayerProperties(
+            createIdLabelProperties(
               textField: "{taz_id}",
-              textSize: 12,
-              textColor: "#0000FF",
-              textHaloColor: "#FFFFFF",
-              textHaloWidth: 1,
+              textColor: "#F85B00",
             ),
           );
           await controller!.addSymbolLayer(
             "old_taz_others_source",
             "old_taz_others_labels",
-            SymbolLayerProperties(
+            createIdLabelProperties(
               textField: "{taz_id}",
-              textSize: 12,
-              textColor: "#4169E1",
-              textHaloColor: "#FFFFFF",
-              textHaloWidth: 1,
+              textColor: "#0000FF",
             ),
           );
         }
       } else if (widget.mode == MapViewMode.newTaz) {
         await _loadNewTazLayers();
         await _loadRadiusCircle();
-        // Use the filtered blocks here as well.
         await _loadBlocksFill();
         await controller!.addFillLayer(
           "new_taz_source",
@@ -1632,12 +1707,9 @@ class MapViewState extends State<MapView> {
           await controller!.addSymbolLayer(
             "new_taz_source",
             "new_taz_labels",
-            SymbolLayerProperties(
+            createIdLabelProperties(
               textField: "{taz_id}",
-              textSize: 12,
               textColor: "#FF0000",
-              textHaloColor: "#FFFFFF",
-              textHaloWidth: 1,
             ),
           );
         }
@@ -1660,27 +1732,23 @@ class MapViewState extends State<MapView> {
               ? ["in", "geoid20", ...widget.selectedIds!.toList()]
               : ["==", "geoid20", ""],
         );
-        // Only add block id labels if the toggle is on.
         if (widget.showIdLabels) {
           await controller!.addSymbolLayer(
             "blocks_fill_source",
             "blocks_labels",
-            SymbolLayerProperties(
+            createIdLabelProperties(
               textField: "{block_label}",
-              textSize: 12,
               textColor: "#000000",
-              textHaloColor: "#FFFFFF",
-              textHaloWidth: 1,
             ),
           );
         }
       } else if (widget.mode == MapViewMode.combined) {
-        // Loads 3 sets: blocks, old TAZ, new TAZ, plus the circle.
+        // Load blocks, old TAZ, and new TAZ layers without auto-zoom.
         final blocksData = await _loadBlocksFill(zoom: false);
         final oldData = await _loadOldTazLayers(zoom: false);
         final newData = await _loadNewTazLayers(zoom: false);
         await _loadRadiusCircle();
-        // Zoom out to fit all in the bounding box.
+        // Zoom out to fit all layers.
         List<dynamic> allFeatures = [];
         if (blocksData != null && blocksData['features'] != null) {
           allFeatures.addAll(blocksData['features']);
@@ -1705,16 +1773,17 @@ class MapViewState extends State<MapView> {
     }
   }
 
-  /// Loads the Old TAZ polygons within the search radius and adds them as two layers:
-  ///  - a "target TAZ" in bold blue
-  ///  - "other TAZ" in lighter blue
+  /// Loads the Old TAZ polygons within the search radius and adds target and other TAZ layers.
   Future<Map<String, dynamic>?> _loadOldTazLayers({bool zoom = true}) async {
     if (controller == null ||
         widget.selectedTazId == null ||
         widget.radius == null) return null;
 
-    final oldTazData = widget.cachedOldTaz ??
-        await loadGeoJson('assets/geojsons/old_taz.geojson');
+    final oldTazData = widget.cachedOldTaz;
+    if (oldTazData == null) {
+      debugPrint("Old TAZ data not loaded.");
+      return null;
+    }
     final List<dynamic> allFeatures = oldTazData['features'] as List<dynamic>;
     final targetFeature = allFeatures.firstWhere(
       (f) =>
@@ -1731,18 +1800,9 @@ class MapViewState extends State<MapView> {
     final turf.Point targetCentroid =
         targetCentroidFeature.geometry as turf.Point;
     double radiusKm = widget.radius! / 1000;
-    List<dynamic> withinFeatures = [];
-    for (var feature in allFeatures) {
-      final turf.Feature f = turf.Feature.fromJson(feature);
-      final centroidFeature = turf.centroid(f);
-      final turf.Point centroid = centroidFeature.geometry as turf.Point;
-      double distance =
-          (turf.distance(targetCentroid, centroid, turf.Unit.kilometers) as num)
-              .toDouble();
-      if (distance <= radiusKm) {
-        withinFeatures.add(feature);
-      }
-    }
+    // Use helper to filter features within the given radius.
+    List<dynamic> withinFeatures =
+        filterFeaturesWithinDistance(allFeatures, targetCentroid, radiusKm);
 
     List<dynamic> targetFeatures = withinFeatures.where((f) {
       final props = f['properties'] as Map<String, dynamic>;
@@ -1758,7 +1818,7 @@ class MapViewState extends State<MapView> {
       'features': withinFeatures
     };
 
-    // The "target" TAZ
+    // The "target" TAZ (drawn in bold orange).
     await _addGeoJsonSourceAndLineLayer(
       sourceId: "old_taz_target_source",
       layerId: "old_taz_target_line",
@@ -1771,10 +1831,10 @@ class MapViewState extends State<MapView> {
       layerId: "old_taz_target_fill",
       geojsonData: {'type': 'FeatureCollection', 'features': targetFeatures},
       fillColor: "#ff8000",
-      fillOpacity: 0.18,
+      fillOpacity: 0.06,
     );
 
-    // The "other" TAZ polygons within radius
+    // The "other" TAZ polygons within the radius.
     await _addGeoJsonSourceAndLineLayer(
       sourceId: "old_taz_others_source",
       layerId: "old_taz_others_line",
@@ -1787,7 +1847,7 @@ class MapViewState extends State<MapView> {
       layerId: "old_taz_others_fill",
       geojsonData: {'type': 'FeatureCollection', 'features': otherFeatures},
       fillColor: "#4169E1",
-      fillOpacity: 0.18,
+      fillOpacity: 0.06,
     );
 
     if (zoom) await _zoomToFeatureBounds(combinedData);
@@ -1800,8 +1860,11 @@ class MapViewState extends State<MapView> {
         widget.selectedTazId == null ||
         widget.radius == null) return null;
 
-    final oldTazData = widget.cachedOldTaz ??
-        await loadGeoJson('assets/geojsons/old_taz.geojson');
+    final oldTazData = widget.cachedOldTaz;
+    if (oldTazData == null) {
+      debugPrint("Old TAZ data not loaded.");
+      return null;
+    }
     final List<dynamic> oldFeatures = oldTazData['features'] as List<dynamic>;
     final oldFeature = oldFeatures.firstWhere(
       (f) =>
@@ -1818,20 +1881,16 @@ class MapViewState extends State<MapView> {
     final turf.Point oldCentroid = oldCentroidFeature.geometry as turf.Point;
     double radiusKm = widget.radius! / 1000;
 
-    final newTazData = widget.cachedNewTaz ??
-        await loadGeoJson('assets/geojsons/new_taz.geojson');
+    final newTazData = widget.cachedNewTaz;
+    if (newTazData == null) {
+      debugPrint("New TAZ data not loaded.");
+      return null;
+    }
     final List<dynamic> newFeatures = newTazData['features'] as List<dynamic>;
 
-    // Filter new TAZ by distance to the old TAZ centroid
-    final filteredNewFeatures = newFeatures.where((feature) {
-      final turf.Feature newTazFeature = turf.Feature.fromJson(feature);
-      final newCentroidFeature = turf.centroid(newTazFeature);
-      final turf.Point newCentroid = newCentroidFeature.geometry as turf.Point;
-      double distance =
-          (turf.distance(oldCentroid, newCentroid, turf.Unit.kilometers) as num)
-              .toDouble();
-      return distance <= radiusKm;
-    }).toList();
+    // Use helper to filter new TAZ features by distance from oldCentroid.
+    final filteredNewFeatures =
+        filterFeaturesWithinDistance(newFeatures, oldCentroid, radiusKm);
 
     if (filteredNewFeatures.isEmpty) {
       debugPrint("No new TAZ features within the radius.");
@@ -1854,28 +1913,21 @@ class MapViewState extends State<MapView> {
       layerId: "new_taz_fill",
       geojsonData: filteredNewData,
       fillColor: "#FF0000",
-      fillOpacity: 0.18,
+      fillOpacity: 0.06,
     );
 
     if (zoom) await _zoomToFeatureBounds(filteredNewData);
     return filteredNewData;
   }
 
-  /// Draw all blocks from the cached GeoJSON with a black outline and orange fill.
-  /// Does NOT do any distance filtering or centroid checks.
+  /// Draws all blocks from the cached GeoJSON with a simple outline and fill.
   Future<void> _drawAllBlocksSimple() async {
     if (controller == null || widget.cachedBlocks == null) return;
-
-    // Use your cached blocks data directly:
     final blocksData = widget.cachedBlocks!;
-
-    // Add a single source for the blocks
     await controller!.addSource(
       "blocks_source",
       GeojsonSourceProperties(data: blocksData),
     );
-
-    // Add an outline layer
     await controller!.addLineLayer(
       "blocks_source",
       "blocks_outline",
@@ -1884,29 +1936,27 @@ class MapViewState extends State<MapView> {
         lineWidth: 1.0,
       ),
     );
-
-    // Add a fill layer
     await controller!.addFillLayer(
       "blocks_source",
       "blocks_fill",
       FillLayerProperties(
         fillColor: "#FFA500",
-        fillOpacity: 0.18,
+        fillOpacity: 0.06,
       ),
     );
-
-    // Optionally zoom to all of the blocks if you want:
     await _zoomToFeatureBounds(blocksData);
   }
 
-  /// Loads the block polygons within the search radius.
+  /// Loads the block polygons within the search radius using an R-Tree prefilter.
   Future<Map<String, dynamic>?> _loadBlocksFill({bool zoom = true}) async {
     if (controller == null ||
         widget.selectedTazId == null ||
         widget.radius == null) return null;
-
-    final oldTazData = widget.cachedOldTaz ??
-        await loadGeoJson('assets/geojsons/old_taz.geojson');
+    final oldTazData = widget.cachedOldTaz;
+    if (oldTazData == null) {
+      debugPrint("Old TAZ data not loaded.");
+      return null;
+    }
     final List<dynamic> oldFeatures = oldTazData['features'] as List<dynamic>;
     final oldFeature = oldFeatures.firstWhere(
       (f) =>
@@ -1922,21 +1972,16 @@ class MapViewState extends State<MapView> {
     final oldCentroidFeature = turf.centroid(oldTazFeature);
     final turf.Point oldCentroid = oldCentroidFeature.geometry as turf.Point;
     double radiusKm = widget.radius! / 1000;
-
-    // Calculate a bounding box around the old TAZ centroid.
     final double centerLat = (oldCentroid.coordinates[1]!).toDouble();
     final double centerLng = (oldCentroid.coordinates[0]!).toDouble();
     final double deltaLat = radiusKm / 110.574;
-    final double deltaLng =
-        radiusKm / (111.320 * math.cos(centerLat * math.pi / 180));
+    final double deltaLng = radiusKm / (111.320 * math.cos(centerLat * math.pi / 180));
     final math.Rectangle<double> circleBBox = math.Rectangle(
       centerLng - deltaLng,
       centerLat - deltaLat,
       2 * deltaLng,
       2 * deltaLat,
     );
-
-    // Use R-Tree for quick prefilter.
     List<dynamic> candidateBlocks = [];
     if (widget.blocksIndex != null) {
       math.Rectangle<num> searchRect = math.Rectangle<num>(
@@ -1946,31 +1991,15 @@ class MapViewState extends State<MapView> {
           .map((datum) => datum.value)
           .toList();
     } else {
-      candidateBlocks =
-          (widget.cachedBlocks?['features'] as List<dynamic>) ?? [];
+      candidateBlocks = (widget.cachedBlocks?['features'] as List<dynamic>) ?? [];
     }
-
     final filteredBlocks = candidateBlocks.where((block) {
       final turf.Feature blockFeature = turf.Feature.fromJson(block);
       final blockCentroidFeature = turf.centroid(blockFeature);
       final turf.Point blockCentroid =
           blockCentroidFeature.geometry as turf.Point;
-      final double blockLng = (blockCentroid.coordinates[0]!).toDouble();
-      final double blockLat = (blockCentroid.coordinates[1]!).toDouble();
-      // Quick bounding box check.
-      if (blockLng < circleBBox.left ||
-          blockLng > circleBBox.left + circleBBox.width ||
-          blockLat < circleBBox.top ||
-          blockLat > circleBBox.top + circleBBox.height) {
-        return false;
-      }
-      // More precise distance check.
-      double distance = (turf.distance(
-              oldCentroid, blockCentroid, turf.Unit.kilometers) as num)
-          .toDouble();
-      return distance <= radiusKm;
+      return isWithinBBoxAndDistance(blockCentroid, circleBBox, oldCentroid, radiusKm);
     }).toList();
-
     if (filteredBlocks.isEmpty) {
       debugPrint("No blocks within the radius.");
       return null;
@@ -1979,10 +2008,7 @@ class MapViewState extends State<MapView> {
       'type': 'FeatureCollection',
       'features': filteredBlocks
     };
-
-    // Set a lower opacity (more transparent) when in old/new TAZ modes.
     double fillOpacity = widget.mode == MapViewMode.blocks ? 0.18 : 0.05;
-
     await _addGeoJsonSourceAndFillLayer(
       sourceId: "blocks_fill_source",
       layerId: "blocks_fill",
@@ -1990,7 +2016,6 @@ class MapViewState extends State<MapView> {
       fillColor: "#FFA500",
       fillOpacity: fillOpacity,
     );
-    // The outline remains unchanged.
     await _addGeoJsonSourceAndLineLayer(
       sourceId: "blocks_line_source",
       layerId: "blocks_line",
@@ -1998,7 +2023,6 @@ class MapViewState extends State<MapView> {
       lineColor: "#000000",
       lineWidth: 0.4,
     );
-
     if (zoom) await _zoomToFeatureBounds(filteredBlocksData);
     return filteredBlocksData;
   }
@@ -2009,7 +2033,6 @@ class MapViewState extends State<MapView> {
         widget.selectedTazId == null ||
         widget.radius == null ||
         widget.cachedOldTaz == null) return;
-
     final List<dynamic> oldFeatures =
         widget.cachedOldTaz!['features'] as List<dynamic>;
     final targetFeature = oldFeatures.firstWhere(
@@ -2019,16 +2042,13 @@ class MapViewState extends State<MapView> {
       orElse: () => null,
     );
     if (targetFeature == null) return;
-
     final turf.Feature targetTazFeature = turf.Feature.fromJson(targetFeature);
     final targetCentroidFeature = turf.centroid(targetTazFeature);
     final turf.Point targetCentroid =
         targetCentroidFeature.geometry as turf.Point;
     double radiusKm = widget.radius! / 1000;
-
     final circleFeature =
         createCirclePolygon(targetCentroid, radiusKm, steps: 64);
-
     await controller!.addSource(
       "radius_circle_source",
       GeojsonSourceProperties(data: circleFeature),
@@ -2051,7 +2071,7 @@ class MapViewState extends State<MapView> {
     );
   }
 
-  /// Adds a source+line layer with the specified color/width.
+  /// Adds a source and a line layer for the provided GeoJSON data.
   Future<void> _addGeoJsonSourceAndLineLayer({
     required String sourceId,
     required String layerId,
@@ -2059,8 +2079,7 @@ class MapViewState extends State<MapView> {
     required String lineColor,
     double lineWidth = 2.0,
   }) async {
-    await controller!
-        .addSource(sourceId, GeojsonSourceProperties(data: geojsonData));
+    await controller!.addSource(sourceId, GeojsonSourceProperties(data: geojsonData));
     await controller!.addLineLayer(
       sourceId,
       layerId,
@@ -2071,16 +2090,15 @@ class MapViewState extends State<MapView> {
     );
   }
 
-  /// Adds a source+fill layer with the specified color/opacity.
+  /// Adds a source and a fill layer for the provided GeoJSON data.
   Future<void> _addGeoJsonSourceAndFillLayer({
     required String sourceId,
     required String layerId,
     required Map<String, dynamic> geojsonData,
     required String fillColor,
-    double fillOpacity = 0.08,
+    double fillOpacity = 0.06,
   }) async {
-    await controller!
-        .addSource(sourceId, GeojsonSourceProperties(data: geojsonData));
+    await controller!.addSource(sourceId, GeojsonSourceProperties(data: geojsonData));
     await controller!.addFillLayer(
       sourceId,
       layerId,
@@ -2091,19 +2109,15 @@ class MapViewState extends State<MapView> {
     );
   }
 
-  /// Zooms to fit all features in [featureCollection].
-  Future<void> _zoomToFeatureBounds(
-      Map<String, dynamic> featureCollection) async {
+  /// Zooms the camera to fit all features in the given FeatureCollection.
+  Future<void> _zoomToFeatureBounds(Map<String, dynamic> featureCollection) async {
     if (controller == null) return;
-
     double? minLat, maxLat, minLng, maxLng;
     final features = featureCollection['features'] as List<dynamic>;
-
     for (final f in features) {
       final geometry = f['geometry'] as Map<String, dynamic>;
       final coords = geometry['coordinates'];
       final geomType = geometry['type'];
-
       if (geomType == 'Polygon') {
         for (final ring in coords) {
           for (final point in ring) {
@@ -2130,13 +2144,10 @@ class MapViewState extends State<MapView> {
         }
       }
     }
-
     if (minLat != null && maxLat != null && minLng != null && maxLng != null) {
       final sw = LatLng(minLat, minLng);
       final ne = LatLng(maxLat, maxLng);
       final bounds = LatLngBounds(southwest: sw, northeast: ne);
-
-      // Mark it as a programmatic update so we don't re-sync out.
       _isProgrammaticallyUpdating = true;
       controller!.moveCamera(
         CameraUpdate.newLatLngBounds(
@@ -2150,10 +2161,9 @@ class MapViewState extends State<MapView> {
     }
   }
 
-  /// Handles a map tap event by querying the relevant layers to find a feature.
+  /// Handles a map tap event by querying rendered features.
   Future<void> _handleMapClick(Point<double> tapPoint) async {
     if (controller == null) return;
-
     List<String> layersToQuery = [];
     if (widget.mode == MapViewMode.oldTaz) {
       layersToQuery = ["old_taz_target_fill", "old_taz_others_fill"];
@@ -2162,12 +2172,9 @@ class MapViewState extends State<MapView> {
     } else if (widget.mode == MapViewMode.blocks) {
       layersToQuery = ["blocks_fill"];
     } else {
-      // Combined mode doesn't do direct selection on click.
       return;
     }
-
-    final features =
-        await controller!.queryRenderedFeatures(tapPoint, layersToQuery, []);
+    final features = await controller!.queryRenderedFeatures(tapPoint, layersToQuery, []);
     if (features != null && features.isNotEmpty) {
       final feature = features.first;
       if (widget.mode == MapViewMode.blocks) {
