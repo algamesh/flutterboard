@@ -267,6 +267,7 @@ class _DashboardPageState extends State<DashboardPage> {
 {
   "version": 8,
   "name": "ArcGIS Satellite",
+  "glyphs": "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
   "sources": {
     "satellite-source": {
       "type": "raster",
